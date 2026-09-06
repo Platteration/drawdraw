@@ -1,0 +1,35 @@
+{
+  "expo": {
+    "name": "DrawDraw",
+    "slug": "drawdraw",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "backgroundColor": "#111114",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.platteration.drawdraw"
+    },
+    "android": {
+      "package": "com.platteration.drawdraw",
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "DrawDraw needs access to your photos so you can pick a portrait to overlay drawing guides on.",
+          "cameraPermission": "DrawDraw needs camera access so you can take a portrait photo to overlay drawing guides on."
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "savePhotosPermission": "DrawDraw saves your exported guide overlays and tracing layers to your photo library.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ]
+    ]
+  }
+}
