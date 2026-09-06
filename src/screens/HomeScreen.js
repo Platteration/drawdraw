@@ -54,9 +54,9 @@ export default function HomeScreen({ onImagePicked }) {
     <View style={styles.container}>
       <Text style={styles.logo}>DrawDraw</Text>
       <Text style={styles.tagline}>
-        Load a portrait, get thirds guides laid over it automatically, then export the guides — with
-        the photo, on their own as a transparent layer, or as a faded tracing layer — to draw over in
-        any drawing app.
+        Load a portrait and a 3D thirds head — chin to nose, nose to brow, brow to crown — is laid
+        over it. Turn it to match the pose through a full 360°, then export the guide with the
+        photo, on its own as a transparent layer, or as a faded tracing layer for any drawing app.
       </Text>
 
       <Pressable style={[styles.button, styles.primary]} onPress={pickFromLibrary} disabled={busy}>
