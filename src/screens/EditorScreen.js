@@ -48,7 +48,7 @@ const VIEW_PRESETS = [
 /** Construction order used by step-by-step reveal. */
 const BUILD_ORDER = ELEMENTS.map((el) => el.key);
 
-export default function EditorScreen({ project, onClose }) {
+export default function EditorScreen({ project, onClose, pro = false, onRequestPro = () => {} }) {
   const image = project.image;
   const saved = project.settings || {};
 
@@ -94,11 +94,17 @@ export default function EditorScreen({ project, onClose }) {
 
   // Elements actually drawn: the step sequence overrides manual toggles.
   const activeElements = useMemo(() => {
-    if (step === null) return elements;
-    const revealed = {};
-    for (let i = 0; i <= step && i < BUILD_ORDER.length; i++) revealed[BUILD_ORDER[i]] = true;
-    return revealed;
-  }, [step, elements]);
+    const chosen = {};
+    if (step === null) {
+      Object.assign(chosen, elements);
+    } else {
+      for (let i = 0; i <= step && i < BUILD_ORDER.length; i++) chosen[BUILD_ORDER[i]] = true;
+    }
+    if (pro) return chosen;
+    const free = {};
+    for (const el of ELEMENTS) if (!el.pro && chosen[el.key]) free[el.key] = true;
+    return free;
+  }, [step, elements, pro]);
 
   useEffect(() => {
     if (!playing) return undefined;
@@ -431,8 +437,9 @@ export default function EditorScreen({ project, onClose }) {
                   key={el.key}
                   label={el.label}
                   active={!!activeElements[el.key]}
+                  locked={el.pro && !pro}
                   disabled={step !== null}
-                  onPress={() => toggleElement(el.key)}
+                  onPress={() => (el.pro && !pro ? onRequestPro() : toggleElement(el.key))}
                 />
               ))}
             </ScrollView>
@@ -442,7 +449,12 @@ export default function EditorScreen({ project, onClose }) {
               <Chip
                 label={step === null ? 'Start' : 'Exit'}
                 active={step !== null}
+                locked={!pro}
                 onPress={() => {
+                  if (!pro) {
+                    onRequestPro();
+                    return;
+                  }
                   setStep(step === null ? 0 : null);
                   setPlaying(false);
                 }}
@@ -472,7 +484,10 @@ export default function EditorScreen({ project, onClose }) {
                 <Chip
                   key={preset.key}
                   label={preset.label}
-                  onPress={() => setProportions(preset.values)}
+                  locked={preset.pro && !pro}
+                  onPress={() =>
+                    preset.pro && !pro ? onRequestPro() : setProportions(preset.values)
+                  }
                 />
               ))}
             </ScrollView>
@@ -572,14 +587,16 @@ export default function EditorScreen({ project, onClose }) {
             onPress={() => exportView(tracingRef, 'Tracing layer', photoSize)}
           />
           <PrimaryButton
-            label={'Turnaround\nsix views'}
+            label={pro ? 'Turnaround\nsix views' : 'Turnaround\nsix views ✦'}
             tone="quiet"
             disabled={busy}
             onPress={() =>
-              exportView(turnaroundRef, 'Turnaround sheet', {
-                width: SHEET_SIZE.width * TURNAROUND_SCALE,
-                height: SHEET_SIZE.height * TURNAROUND_SCALE,
-              })
+              !pro
+                ? onRequestPro()
+                : exportView(turnaroundRef, 'Turnaround sheet', {
+                    width: SHEET_SIZE.width * TURNAROUND_SCALE,
+                    height: SHEET_SIZE.height * TURNAROUND_SCALE,
+                  })
             }
           />
         </View>

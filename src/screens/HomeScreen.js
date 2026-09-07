@@ -47,7 +47,7 @@ function HeadMark({ size = 118 }) {
   );
 }
 
-export default function HomeScreen({ onOpenProject }) {
+export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = () => {}, onReplayIntro = () => {} }) {
   const [busy, setBusy] = useState(false);
   const [recents, setRecents] = useState([]);
 
@@ -149,6 +149,20 @@ export default function HomeScreen({ onOpenProject }) {
           <Text style={styles.recentsHint}>Tap to reopen · hold to remove</Text>
         </View>
       )}
+
+      <View style={styles.footer}>
+        <Pressable onPress={onReplayIntro} hitSlop={8}>
+          <Text style={styles.footerLink}>How it works</Text>
+        </Pressable>
+        {!pro && (
+          <>
+            <Text style={styles.footerDot}>·</Text>
+            <Pressable onPress={onRequestPro} hitSlop={8}>
+              <Text style={[styles.footerLink, styles.footerLinkAccent]}>Unlock Pro</Text>
+            </Pressable>
+          </>
+        )}
+      </View>
     </View>
   );
 }
@@ -228,6 +242,24 @@ const styles = StyleSheet.create({
   thumbImage: {
     width: '100%',
     height: '100%',
+  },
+  footer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 26,
+  },
+  footerLink: {
+    color: colors.graphiteSoft,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  footerLinkAccent: {
+    color: colors.accent,
+  },
+  footerDot: {
+    color: colors.graphiteFaint,
   },
   recentsHint: {
     color: colors.graphiteFaint,
