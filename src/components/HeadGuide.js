@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
-import { buildHeadWireframe, HEAD_HEIGHT_UNITS, MAX_RADIUS } from '../lib/headModel';
+import { buildHeadWireframe, DRAFT_SAMPLES, HEAD_HEIGHT_UNITS, MAX_RADIUS } from '../lib/headModel';
 
 const DEPTH_BUCKETS = 4; // depth-tapered stroke width, quantized for performance
 
@@ -23,11 +23,16 @@ export default function HeadGuide({
   taper = true,
   elements,
   proportions,
+  draft = false,
 }) {
   const { yaw, pitch, roll, x, y, scale } = transform;
+  // While the head is being dragged, sample the curves more coarsely and skip
+  // the depth-taper split: both multiply how many <Path> nodes cross to native
+  // on every touch move, which is what costs frames — not the projection math.
+  const samples = draft ? DRAFT_SAMPLES : undefined;
   const wire = useMemo(
-    () => buildHeadWireframe(yaw, pitch, roll, { elements, proportions }),
-    [yaw, pitch, roll, elements, proportions]
+    () => buildHeadWireframe(yaw, pitch, roll, { elements, proportions, samples }),
+    [yaw, pitch, roll, elements, proportions, samples]
   );
 
   const ppu = (scale * height) / HEAD_HEIGHT_UNITS; // pixels per model unit
@@ -54,7 +59,7 @@ export default function HeadGuide({
     thickness * (0.7 + (0.55 * bucket) / Math.max(1, DEPTH_BUCKETS - 1));
 
   const renderPoly = (poly, key, { opacity, dash }) => {
-    if (!taper) {
+    if (!taper || draft) {
       return (
         <Path
           key={key}

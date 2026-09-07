@@ -58,6 +58,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const [headTransform, setHeadTransform] = useState(saved.headTransform ?? DEFAULT_HEAD);
   const [mode, setMode] = useState('rotate'); // 'rotate' | 'move' | 'lines' | 'fit'
   const [fitTaps, setFitTaps] = useState([]);
+  const [interacting, setInteracting] = useState(false); // a gesture is in flight
 
   // Which construction lines are drawn, and the head's proportions.
   const [elements, setElements] = useState(saved.elements ?? DEFAULT_ELEMENTS);
@@ -276,7 +277,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const photoVisible = !practice || peeking;
 
   // Everything that goes on top of the photo, mirrored 1:1 in the exports.
-  const renderGuides = () => (
+  const renderGuides = ({ draft = false } = {}) => (
     <>
       {anyLines && (
         <GuideOverlay
@@ -296,6 +297,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
           proportions={proportions}
           color={guideColor}
           thickness={lineWeight}
+          draft={draft}
         />
       )}
     </>
@@ -326,7 +328,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
               source={{ uri: image.uri }}
               style={{ width: displayW, height: displayH, opacity: photoVisible ? 1 : 0 }}
             />
-            {renderGuides()}
+            {renderGuides({ draft: interacting })}
             {linesEditable &&
               showHorizontal &&
               hGuides.map((fraction, i) => (
@@ -365,6 +367,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                 mode={mode}
                 transform={headTransform}
                 onChange={setHeadTransform}
+                onInteractingChange={setInteracting}
                 width={displayW}
                 height={displayH}
               />

@@ -1,5 +1,6 @@
 import {
   buildHeadWireframe,
+  DRAFT_SAMPLES,
   DEFAULT_PROPORTIONS,
   ELEMENTS,
   HEAD_HEIGHT_UNITS,
@@ -104,6 +105,19 @@ describe('buildHeadWireframe', () => {
     const count = (w) => w.front.length + w.back.length;
     expect(count(some)).toBeGreaterThan(count(bare));
     expect(count(all)).toBeGreaterThan(count(some));
+  });
+
+  it('draws a lighter wireframe in draft sampling without changing its shape', () => {
+    const full = buildHeadWireframe(35, 12, 0, { elements: ALL_ELEMENTS });
+    const draft = buildHeadWireframe(35, 12, 0, {
+      elements: ALL_ELEMENTS,
+      samples: DRAFT_SAMPLES,
+    });
+    expect(allPoints(draft).length).toBeLessThan(allPoints(full).length * 0.6);
+    // Same head, just described with fewer points: the silhouette must agree.
+    for (const axis of ['x', 'y']) {
+      expect(extent(draft.outline.points, axis)).toBeCloseTo(extent(full.outline.points, axis), 2);
+    }
   });
 
   it('scales with the width and depth proportions', () => {

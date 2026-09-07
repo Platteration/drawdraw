@@ -17,7 +17,10 @@
 const B = 1.5; // half-height; head height = 3 units = the three segments
 const BASE_A = 1.05; // half-width at proportion 1.0
 const BASE_C = 1.25; // half-depth at proportion 1.0
-const SAMPLES = 96;
+const SAMPLES = 96; // points per closed curve at full quality
+
+/** Coarser sampling, used while a gesture is in flight. */
+export const DRAFT_SAMPLES = 40;
 
 export const HEAD_HEIGHT_UNITS = 2 * B;
 
@@ -139,9 +142,10 @@ export function rotationMatrix(yawDeg, pitchDeg, rollDeg) {
   return matMul(rz, matMul(rx, ry));
 }
 
-const axes = (proportions) => ({
+const axes = (proportions, samples) => ({
   A: BASE_A * proportions.width,
   C: BASE_C * proportions.depth,
+  samples,
 });
 
 // --- curve builders -------------------------------------------------------
@@ -149,11 +153,11 @@ const axes = (proportions) => ({
 // derived from the ellipsoid unless a curve supplies its own.
 
 /** Horizontal cross-section of the ellipsoid at local height y0. */
-function latitudeRing(y0, { A, C }) {
+function latitudeRing(y0, { A, C, samples }) {
   const s = Math.sqrt(Math.max(0, 1 - (y0 / B) ** 2));
   const points = [];
-  for (let i = 0; i < SAMPLES; i++) {
-    const t = (2 * Math.PI * i) / SAMPLES;
+  for (let i = 0; i < samples; i++) {
+    const t = (2 * Math.PI * i) / samples;
     points.push([A * s * Math.cos(t), y0, C * s * Math.sin(t)]);
   }
   return { points, closed: true };
@@ -164,23 +168,23 @@ function latitudeRing(y0, { A, C }) {
  * direction is phi degrees off the facing (+z) axis. phi = 0 is the center
  * line down the face and over the skull.
  */
-function longitudeRing(phiDeg, { A, C }) {
+function longitudeRing(phiDeg, { A, C, samples }) {
   const sp = Math.sin(rad(phiDeg));
   const cp = Math.cos(rad(phiDeg));
   const points = [];
-  for (let i = 0; i < SAMPLES; i++) {
-    const t = (2 * Math.PI * i) / SAMPLES;
+  for (let i = 0; i < samples; i++) {
+    const t = (2 * Math.PI * i) / samples;
     points.push([A * sp * Math.sin(t), B * Math.cos(t), C * cp * Math.sin(t)]);
   }
   return { points, closed: true };
 }
 
 /** Vertical cross-section at x = x0 — the flat side plane of the Loomis ball. */
-function sagittalRing(x0, { A, C }) {
+function sagittalRing(x0, { A, C, samples }) {
   const s = Math.sqrt(Math.max(0, 1 - (x0 / A) ** 2));
   const points = [];
-  for (let i = 0; i < SAMPLES; i++) {
-    const t = (2 * Math.PI * i) / SAMPLES;
+  for (let i = 0; i < samples; i++) {
+    const t = (2 * Math.PI * i) / samples;
     points.push([x0, B * s * Math.cos(t), C * s * Math.sin(t)]);
   }
   return { points, closed: true };
@@ -191,7 +195,7 @@ function sagittalRing(x0, { A, C }) {
  * which is exactly where an ear sits on a real head, and one of the most
  * useful checks the method gives you.
  */
-function ear(side, { A, C }, { noseY, browY }) {
+function ear(side, { A, C, samples }, { noseY, browY }) {
   const x0 = side * A * 0.62;
   const s = Math.sqrt(Math.max(0, 1 - 0.62 ** 2));
   const cyMid = (noseY + browY) / 2;
@@ -200,8 +204,9 @@ function ear(side, { A, C }, { noseY, browY }) {
   const cz = -C * s * 0.12; // set slightly behind the side plane's center
   const points = [];
   const normals = [];
-  for (let i = 0; i < SAMPLES / 2; i++) {
-    const t = (2 * Math.PI * i) / (SAMPLES / 2);
+  const half = Math.round(samples / 2);
+  for (let i = 0; i < half; i++) {
+    const t = (2 * Math.PI * i) / half;
     points.push([x0, cyMid + ry * Math.cos(t), cz + rz * Math.sin(t)]);
     normals.push([side, 0, 0]); // the ear faces outward along the side plane
   }
@@ -313,7 +318,7 @@ function splitByVisibility(pts, closed) {
  * quadric Q = R·diag(1/A², 1/B², 1/C²)·Rᵀ along z via its Schur complement,
  * giving the 2D ellipse { u : uᵀSu = 1 }.
  */
-function silhouette(m, { A, C }) {
+function silhouette(m, { A, C, samples }) {
   const D = [
     [1 / (A * A), 0, 0],
     [0, 1 / (B * B), 0],
@@ -324,8 +329,8 @@ function silhouette(m, { A, C }) {
   const s01 = Q[0][1] - (Q[0][2] * Q[1][2]) / Q[2][2];
   const s11 = Q[1][1] - (Q[1][2] * Q[1][2]) / Q[2][2];
   const points = [];
-  for (let i = 0; i < SAMPLES; i++) {
-    const t = (2 * Math.PI * i) / SAMPLES;
+  for (let i = 0; i < samples; i++) {
+    const t = (2 * Math.PI * i) / samples;
     const c = Math.cos(t);
     const s = Math.sin(t);
     const r = 1 / Math.sqrt(s00 * c * c + 2 * s01 * c * s + s11 * s * s);
@@ -347,7 +352,7 @@ export function buildHeadWireframe(yaw, pitch, roll, options = {}) {
   // The caller's element set is authoritative — an element left out is off, not
   // defaulted back on. Defaults apply only when no set is supplied at all.
   const elements = options.elements || DEFAULT_ELEMENTS;
-  const ax = axes(proportions);
+  const ax = axes(proportions, options.samples || SAMPLES);
   const { noseY, browY } = proportions;
 
   const curves = [latitudeRing(noseY, ax), latitudeRing(browY, ax)];
@@ -378,7 +383,7 @@ export function buildHeadWireframe(yaw, pitch, roll, options = {}) {
  */
 export function projectLandmarks(yaw, pitch, roll, proportions = DEFAULT_PROPORTIONS) {
   const p = { ...DEFAULT_PROPORTIONS, ...proportions };
-  const ax = axes(p);
+  const ax = axes(p, SAMPLES);
   const onFace = (y) => {
     const s = Math.sqrt(Math.max(0, 1 - (y / B) ** 2));
     return [0, y, ax.C * s];

@@ -9,6 +9,9 @@ export function Chip({ label, active, onPress, disabled, locked }) {
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ selected: !!active, disabled: !!disabled }}
+      accessibilityLabel={locked ? `${label}, requires Pro` : label}
       style={[
         styles.chip,
         active && styles.chipActive,
@@ -27,6 +30,8 @@ export function SliderRow({ label, value, min, max, step, onChange, format }) {
     <View style={styles.sliderRow}>
       <Text style={styles.sliderLabel}>{label}</Text>
       <Slider
+        accessibilityLabel={label}
+        accessibilityValue={{ now: value, min, max }}
         style={styles.slider}
         minimumValue={min}
         maximumValue={max}
@@ -55,6 +60,9 @@ export function PrimaryButton({ label, onPress, disabled, tone = 'accent' }) {
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: !!disabled }}
+      accessibilityLabel={label.replace(/\n/g, ' ')}
       style={[
         styles.primary,
         tone === 'quiet' && styles.primaryQuiet,

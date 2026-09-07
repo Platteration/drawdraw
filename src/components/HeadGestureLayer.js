@@ -46,9 +46,16 @@ function touchGeometry(touches) {
  *  - one finger: rotate (yaw/pitch) in "rotate" mode, or reposition in "move" mode
  *  - two fingers: pinch to scale, twist to roll, drag to reposition (any mode)
  */
-export default function HeadGestureLayer({ mode, transform, onChange, width, height }) {
-  const live = useRef({ mode, transform, onChange, width, height });
-  live.current = { mode, transform, onChange, width, height };
+export default function HeadGestureLayer({
+  mode,
+  transform,
+  onChange,
+  width,
+  height,
+  onInteractingChange = () => {},
+}) {
+  const live = useRef({ mode, transform, onChange, width, height, onInteractingChange });
+  live.current = { mode, transform, onChange, width, height, onInteractingChange };
 
   const base = useRef(null); // { transform, geo } snapshot at gesture start
   const lastSnap = useRef(null); // yaw value most recently snapped to
@@ -58,6 +65,7 @@ export default function HeadGestureLayer({ mode, transform, onChange, width, hei
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
+        live.current.onInteractingChange(true);
         base.current = {
           transform: live.current.transform,
           geo: touchGeometry(evt.nativeEvent.touches),
@@ -104,6 +112,12 @@ export default function HeadGestureLayer({ mode, transform, onChange, width, hei
       onPanResponderRelease: () => {
         base.current = null;
         lastSnap.current = null;
+        live.current.onInteractingChange(false);
+      },
+      onPanResponderTerminate: () => {
+        base.current = null;
+        lastSnap.current = null;
+        live.current.onInteractingChange(false);
       },
     })
   ).current;
