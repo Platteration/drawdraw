@@ -13,7 +13,11 @@
     },
     "android": {
       "package": "com.platteration.drawdraw",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#f4efe6"
+      }
     },
     "plugins": [
       [
@@ -29,7 +33,20 @@
           "savePhotosPermission": "DrawDraw saves your exported guide overlays and tracing layers to your photo library.",
           "isAccessMediaLocationEnabled": false
         }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#f4efe6"
+        }
       ]
-    ]
+    ],
+    "icon": "./assets/icon.png",
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
   }
 }
