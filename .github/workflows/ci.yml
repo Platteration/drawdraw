@@ -21,3 +21,16 @@ jobs:
         run: npx expo export --platform ios --platform android --output-dir .export-check
       - name: Icons still match the model
         run: npm run icons:check
+
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Smoke test the app in a browser
+        run: npm run e2e

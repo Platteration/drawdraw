@@ -91,6 +91,7 @@ haptics and the share sheet need a real device.
 
 ```bash
 npm test          # unit tests for the head model, fit solver and filenames
+npm run e2e       # build for web and drive the app in a real browser
 npm run icons     # regenerate assets/ from the head model
 ```
 
@@ -100,6 +101,14 @@ sphere of orientations and every proportion preset, hidden-line splitting, the
 two signals the fit reads, and the solver's recovery, noise tolerance and
 refusal of degenerate input. CI runs the tests, bundles for both platforms, and
 checks that `assets/` still matches what the model generates.
+
+Bundling proves the app compiles; `npm run e2e` proves it runs. It builds for
+web, serves it, and drives the real critical path in Chromium — onboarding,
+importing a portrait, fitting the guide with three taps — then reads the
+rendered SVG back and checks where the guide actually landed against a
+synthetic portrait laid out on known thirds. Any console or page error fails
+the run, which is how a runtime break gets caught while bundling still
+succeeds. Web is a test surface rather than a shipping target.
 
 ## Building standalone apps
 

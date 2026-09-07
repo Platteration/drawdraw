@@ -11,11 +11,14 @@ npm install
 npx expo start          # run on a device via Expo Go
 npm test                # jest, via the jest-expo preset
 npm run icons           # regenerate assets/ from the head model
+npm run e2e             # build for web and drive the app in a browser
 npx expo export --platform ios --platform android --output-dir .export-check
 ```
 
 `npx expo export` is the fastest way to confirm a change still compiles for both
-platforms; there is no device in CI. Run it (and `npm test`) before pushing.
+platforms. `npm run e2e` is how to confirm it actually *runs*: there is no
+device in CI, so the web build stands in for one. Run both (and `npm test`)
+before pushing.
 
 ## Where things live
 
@@ -29,6 +32,10 @@ platforms; there is no device in CI. Run it (and `npm test`) before pushing.
   keeps exports identical to what you see.
 - `src/screens/EditorScreen.js` — the editor; holds the guide state.
 - `tools/make-icons.mjs` — renders `assets/` from `headModel.js`.
+- `e2e/smoke.mjs` — drives the real critical path in a browser and measures
+  where the three-tap fit actually lands, against a synthetic portrait laid out
+  on known thirds (`e2e/portrait.mjs`). It fails on any console or page error,
+  which is how a runtime break gets caught when bundling still succeeds.
 
 ## Conventions
 
@@ -44,3 +51,6 @@ platforms; there is no device in CI. Run it (and `npm test`) before pushing.
   Exports always render at full quality.
 - Free features are never watermarked, and there are no ads or consumables.
   New paid surface goes behind `pro` in `src/lib/pro.js`.
+- Web is a test surface, not a shipping target, but it has to stay working
+  because the smoke test rides on it. Prefer a dependency that behaves the same
+  on all three platforms over one that needs a web special case.

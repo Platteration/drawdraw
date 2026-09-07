@@ -9,8 +9,9 @@
  * Everything here is standard library: a small analytic-coverage line
  * rasterizer and a minimal PNG encoder (zlib ships with Node).
  */
-import { deflateSync, inflateSync } from 'node:zlib';
 import { readFileSync, writeFileSync } from 'node:fs';
+
+import { decodePng, encodePng } from './png.mjs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -97,73 +98,6 @@ function strokePolyline(mask, size, points, closed, width) {
   }
 }
 
-// --- PNG ------------------------------------------------------------------
-
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c;
-  }
-  return table;
-})();
-
-function crc32(buffer) {
-  let c = 0xffffffff;
-  for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
-  return (c ^ 0xffffffff) >>> 0;
-}
-
-function chunk(type, data) {
-  const length = Buffer.alloc(4);
-  length.writeUInt32BE(data.length);
-  const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(body));
-  return Buffer.concat([length, body, crc]);
-}
-
-function encodePng({ size, pixels }) {
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(size, 0);
-  header.writeUInt32BE(size, 4);
-  header[8] = 8; // bit depth
-  header[9] = 6; // truecolor with alpha
-  // Each scanline is prefixed with filter type 0 (none).
-  const raw = Buffer.alloc(size * (size * 4 + 1));
-  for (let y = 0; y < size; y++) {
-    const rowStart = y * (size * 4 + 1);
-    raw[rowStart] = 0;
-    Buffer.from(pixels.buffer, y * size * 4, size * 4).copy(raw, rowStart + 1);
-  }
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', header),
-    chunk('IDAT', deflateSync(raw, { level: 9 })),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
-
-/** Decode a PNG this tool wrote: truecolor-alpha, filter 0 on every scanline. */
-function decodePng(buffer) {
-  const size = buffer.readUInt32BE(16);
-  const chunks = [];
-  let offset = 8;
-  while (offset < buffer.length) {
-    const length = buffer.readUInt32BE(offset);
-    const type = buffer.toString('ascii', offset + 4, offset + 8);
-    if (type === 'IDAT') chunks.push(buffer.subarray(offset + 8, offset + 8 + length));
-    offset += length + 12;
-  }
-  const raw = inflateSync(Buffer.concat(chunks));
-  const pixels = Buffer.alloc(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    raw.copy(pixels, y * size * 4, y * (size * 4 + 1) + 1, (y + 1) * (size * 4 + 1));
-  }
-  return { size, pixels };
-}
-
 // --- the mark -------------------------------------------------------------
 
 /**
@@ -224,7 +158,7 @@ for (const output of OUTPUTS) {
     try {
       const existing = decodePng(readFileSync(path));
       matches =
-        existing.size === output.size && Buffer.from(canvas.pixels.buffer).equals(existing.pixels);
+        existing.width === output.size && Buffer.from(canvas.pixels.buffer).equals(existing.pixels);
     } catch {
       matches = false;
     }
@@ -233,7 +167,7 @@ for (const output of OUTPUTS) {
     continue;
   }
 
-  writeFileSync(path, encodePng(canvas));
+  writeFileSync(path, encodePng(canvas.size, canvas.size, canvas.pixels));
   console.log(`wrote assets/${output.file} (${output.size}×${output.size})`);
 }
 
