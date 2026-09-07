@@ -344,7 +344,9 @@ function silhouette(m, { A, C }) {
  */
 export function buildHeadWireframe(yaw, pitch, roll, options = {}) {
   const proportions = { ...DEFAULT_PROPORTIONS, ...(options.proportions || {}) };
-  const elements = { ...DEFAULT_ELEMENTS, ...(options.elements || {}) };
+  // The caller's element set is authoritative — an element left out is off, not
+  // defaulted back on. Defaults apply only when no set is supplied at all.
+  const elements = options.elements || DEFAULT_ELEMENTS;
   const ax = axes(proportions);
   const { noseY, browY } = proportions;
 
