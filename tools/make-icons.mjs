@@ -2,10 +2,14 @@
  * Generates the app icons and splash mark from the real head model, so the
  * app's identity and its subject can never drift apart. Run: npm run icons
  *
+ * Pass --check to verify the committed assets still match the model without
+ * writing anything. It compares decoded pixels rather than file bytes, since
+ * zlib's output can differ between Node versions while the image does not.
+ *
  * Everything here is standard library: a small analytic-coverage line
  * rasterizer and a minimal PNG encoder (zlib ships with Node).
  */
-import { deflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -141,6 +145,25 @@ function encodePng({ size, pixels }) {
   ]);
 }
 
+/** Decode a PNG this tool wrote: truecolor-alpha, filter 0 on every scanline. */
+function decodePng(buffer) {
+  const size = buffer.readUInt32BE(16);
+  const chunks = [];
+  let offset = 8;
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    if (type === 'IDAT') chunks.push(buffer.subarray(offset + 8, offset + 8 + length));
+    offset += length + 12;
+  }
+  const raw = inflateSync(Buffer.concat(chunks));
+  const pixels = Buffer.alloc(size * size * 4);
+  for (let y = 0; y < size; y++) {
+    raw.copy(pixels, y * size * 4, y * (size * 4 + 1) + 1, (y + 1) * (size * 4 + 1));
+  }
+  return { size, pixels };
+}
+
 // --- the mark -------------------------------------------------------------
 
 /**
@@ -188,10 +211,33 @@ const OUTPUTS = [
   { file: 'favicon.png', size: 96, background: PAPER, coverage: 0.72, weight: 0.03 },
 ];
 
+const check = process.argv.includes('--check');
+let stale = 0;
+
 for (const output of OUTPUTS) {
   const canvas = createCanvas(output.size, output.background);
   drawHead(canvas, { coverage: output.coverage, weight: output.weight, elements: ELEMENTS });
   const path = join(root, 'assets', output.file);
+
+  if (check) {
+    let matches = false;
+    try {
+      const existing = decodePng(readFileSync(path));
+      matches =
+        existing.size === output.size && Buffer.from(canvas.pixels.buffer).equals(existing.pixels);
+    } catch {
+      matches = false;
+    }
+    console.log(`${matches ? 'ok  ' : 'STALE'} assets/${output.file}`);
+    if (!matches) stale++;
+    continue;
+  }
+
   writeFileSync(path, encodePng(canvas));
   console.log(`wrote assets/${output.file} (${output.size}×${output.size})`);
+}
+
+if (stale > 0) {
+  console.error(`\n${stale} asset(s) no longer match the model — run: npm run icons`);
+  process.exit(1);
 }

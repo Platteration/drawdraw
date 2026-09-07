@@ -19,11 +19,5 @@ jobs:
         run: npx jest --ci
       - name: Bundle for iOS and Android
         run: npx expo export --platform ios --platform android --output-dir .export-check
-      - name: Icons are reproducible from the model
-        run: |
-          npm run icons
-          if ! git diff --quiet -- assets; then
-            echo "assets/ is out of date — run 'npm run icons' and commit the result" >&2
-            git diff --stat -- assets >&2
-            exit 1
-          fi
+      - name: Icons still match the model
+        run: npm run icons:check

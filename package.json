@@ -8,7 +8,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
-    "icons": "node tools/make-icons.mjs"
+    "icons": "node tools/make-icons.mjs",
+    "icons:check": "node tools/make-icons.mjs --check"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.1.2",
