@@ -17,18 +17,19 @@ import GuideOverlay from '../components/GuideOverlay';
 import DraggableGuide from '../components/DraggableGuide';
 import HeadGuide from '../components/HeadGuide';
 import HeadGestureLayer from '../components/HeadGestureLayer';
+import { Chip, Divider, PrimaryButton, SectionLabel, SliderRow } from '../components/ui';
+import { colors, GUIDE_COLORS, radius, type } from '../theme';
 
 const THIRDS = [1 / 3, 2 / 3];
-const GUIDE_COLORS = ['#ff3b6b', '#4f7cff', '#2bd97c', '#111114', '#ffffff'];
-const LINE_THICKNESS = 2;
-const TRACING_OPACITY = 0.3;
 const MAX_EXPORT_DIMENSION = 4096;
 
 const DEFAULT_HEAD = { yaw: 0, pitch: 0, roll: 0, x: 0.5, y: 0.45, scale: 0.6 };
 const VIEW_PRESETS = [
-  { label: 'Front', yaw: 0 },
-  { label: '¾ view', yaw: 40 },
-  { label: 'Profile', yaw: 90 },
+  { label: 'Front', yaw: 0, pitch: 0 },
+  { label: '¾', yaw: 40, pitch: 0 },
+  { label: 'Profile', yaw: 90, pitch: 0 },
+  { label: 'Above', yaw: 25, pitch: 22 },
+  { label: 'Below', yaw: 25, pitch: -22 },
 ];
 
 export default function EditorScreen({ image, onClose }) {
@@ -45,7 +46,11 @@ export default function EditorScreen({ image, onClose }) {
   const [showVertical, setShowVertical] = useState(false);
   const [showCenter, setShowCenter] = useState(false);
 
-  const [guideColor, setGuideColor] = useState(GUIDE_COLORS[0]);
+  const [guideColor, setGuideColor] = useState(GUIDE_COLORS[0].value);
+  const [lineWeight, setLineWeight] = useState(2);
+  const [tracingOpacity, setTracingOpacity] = useState(0.3);
+  const [panel, setPanel] = useState('guide'); // 'guide' | 'style'
+
   const [viewport, setViewport] = useState(null); // area available for the image
   const [busy, setBusy] = useState(false);
 
@@ -147,7 +152,7 @@ export default function EditorScreen({ image, onClose }) {
           height={displayH}
           guides={guides}
           color={guideColor}
-          thickness={LINE_THICKNESS}
+          thickness={lineWeight}
         />
       )}
       {showHead && (
@@ -156,7 +161,7 @@ export default function EditorScreen({ image, onClose }) {
           height={displayH}
           transform={headTransform}
           color={guideColor}
-          thickness={LINE_THICKNESS}
+          thickness={lineWeight}
         />
       )}
     </>
@@ -168,7 +173,7 @@ export default function EditorScreen({ image, onClose }) {
         <Pressable onPress={onClose} hitSlop={12}>
           <Text style={styles.headerAction}>‹ New photo</Text>
         </Pressable>
-        <Text style={styles.headerTitle}>Thirds guide</Text>
+        <Text style={type.title}>Three-segment head</Text>
         <Pressable onPress={resetAll} hitSlop={12}>
           <Text style={styles.headerAction}>Reset</Text>
         </Pressable>
@@ -178,11 +183,11 @@ export default function EditorScreen({ image, onClose }) {
         style={styles.canvasArea}
         onLayout={(e) => {
           const { width, height } = e.nativeEvent.layout;
-          setViewport({ width: width - 16, height: height - 16 });
+          setViewport({ width: width - 20, height: height - 20 });
         }}
       >
         {ready && (
-          <View style={{ width: displayW, height: displayH }}>
+          <View style={[styles.canvas, { width: displayW, height: displayH }]}>
             <Image source={{ uri: image.uri }} style={{ width: displayW, height: displayH }} />
             {renderGuides()}
             {!headInteractive &&
@@ -223,79 +228,98 @@ export default function EditorScreen({ image, onClose }) {
       </View>
 
       <View style={styles.controls}>
-        {showHead && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.toggleRow}
-          >
-            <Chip label="Rotate" active={mode === 'rotate'} onPress={() => setMode('rotate')} />
-            <Chip label="Move" active={mode === 'move'} onPress={() => setMode('move')} />
-            {anyLines && (
-              <Chip label="Edit lines" active={mode === 'lines'} onPress={() => setMode('lines')} />
-            )}
-            <View style={styles.divider} />
-            {VIEW_PRESETS.map((preset) => (
+        <View style={styles.tabs}>
+          <Chip label="Guide" active={panel === 'guide'} onPress={() => setPanel('guide')} />
+          <Chip label="Style" active={panel === 'style'} onPress={() => setPanel('style')} />
+        </View>
+
+        {panel === 'guide' ? (
+          <>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              <Chip label="Rotate" active={mode === 'rotate'} onPress={() => setMode('rotate')} />
+              <Chip label="Move" active={mode === 'move'} onPress={() => setMode('move')} />
+              {anyLines && (
+                <Chip label="Lines" active={mode === 'lines'} onPress={() => setMode('lines')} />
+              )}
+              <Divider />
+              {VIEW_PRESETS.map((preset) => (
+                <Chip
+                  key={preset.label}
+                  label={preset.label}
+                  onPress={() =>
+                    setHeadTransform((t) => ({ ...t, yaw: preset.yaw, pitch: preset.pitch, roll: 0 }))
+                  }
+                />
+              ))}
+            </ScrollView>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              <Chip label="3D head" active={showHead} onPress={() => setShowHead(!showHead)} />
               <Chip
-                key={preset.label}
-                label={preset.label}
-                onPress={() =>
-                  setHeadTransform((t) => ({ ...t, yaw: preset.yaw, pitch: 0, roll: 0 }))
-                }
+                label="H lines"
+                active={showHorizontal}
+                onPress={() => setShowHorizontal(!showHorizontal)}
               />
-            ))}
-          </ScrollView>
+              <Chip
+                label="V lines"
+                active={showVertical}
+                onPress={() => setShowVertical(!showVertical)}
+              />
+              <Chip label="Center" active={showCenter} onPress={() => setShowCenter(!showCenter)} />
+            </ScrollView>
+          </>
+        ) : (
+          <>
+            <SectionLabel>Guide color</SectionLabel>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              {GUIDE_COLORS.map((c) => (
+                <Pressable
+                  key={c.value}
+                  onPress={() => setGuideColor(c.value)}
+                  style={[
+                    styles.swatch,
+                    { backgroundColor: c.value },
+                    c.value === guideColor && styles.swatchActive,
+                  ]}
+                />
+              ))}
+            </ScrollView>
+            <SliderRow
+              label="Line weight"
+              value={lineWeight}
+              min={1}
+              max={6}
+              step={0.5}
+              onChange={setLineWeight}
+              format={(v) => `${v.toFixed(1)}px`}
+            />
+            <SliderRow
+              label="Tracing"
+              value={tracingOpacity}
+              min={0.05}
+              max={0.85}
+              step={0.05}
+              onChange={setTracingOpacity}
+              format={(v) => `${Math.round(v * 100)}%`}
+            />
+          </>
         )}
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.toggleRow}
-        >
-          <Chip label="3D head" active={showHead} onPress={() => setShowHead(!showHead)} />
-          <Chip
-            label="H lines"
-            active={showHorizontal}
-            onPress={() => setShowHorizontal(!showHorizontal)}
-          />
-          <Chip
-            label="V lines"
-            active={showVertical}
-            onPress={() => setShowVertical(!showVertical)}
-          />
-          <Chip label="Center" active={showCenter} onPress={() => setShowCenter(!showCenter)} />
-          <View style={styles.divider} />
-          {GUIDE_COLORS.map((color) => (
-            <Pressable
-              key={color}
-              onPress={() => setGuideColor(color)}
-              style={[
-                styles.swatch,
-                { backgroundColor: color },
-                color === guideColor && styles.swatchActive,
-              ]}
-            />
-          ))}
-        </ScrollView>
-
-        <Text style={styles.exportHint}>
-          Drag to turn the head, pinch to size it, twist two fingers to tilt it, then line it up
-          with the portrait. PNG exports keep transparency for layering in your drawing app.
-        </Text>
-
+        <SectionLabel>Export · PNG at full resolution</SectionLabel>
         <View style={styles.exportRow}>
-          <ExportButton
-            label={'Photo\n+ guides'}
+          <PrimaryButton
+            label={'Photo\n+ guide'}
+            tone="quiet"
             disabled={busy || !ready}
-            onPress={() => exportView(combinedRef, 'Photo with guides')}
+            onPress={() => exportView(combinedRef, 'Photo with guide')}
           />
-          <ExportButton
-            label={'Guides only\n(transparent)'}
+          <PrimaryButton
+            label={'Guide only\ntransparent'}
             disabled={busy || !ready}
-            onPress={() => exportView(guidesOnlyRef, 'Transparent guides')}
+            onPress={() => exportView(guidesOnlyRef, 'Transparent guide')}
           />
-          <ExportButton
-            label={'Tracing layer\n(faded photo)'}
+          <PrimaryButton
+            label={'Tracing\nlayer'}
+            tone="quiet"
             disabled={busy || !ready}
             onPress={() => exportView(tracingRef, 'Tracing layer')}
           />
@@ -304,7 +328,7 @@ export default function EditorScreen({ image, onClose }) {
 
       {busy && (
         <View style={styles.busyOverlay} pointerEvents="none">
-          <ActivityIndicator size="large" color="#f5f5f7" />
+          <ActivityIndicator size="large" color={colors.paper} />
         </View>
       )}
 
@@ -330,7 +354,7 @@ export default function EditorScreen({ image, onClose }) {
           >
             <Image
               source={{ uri: image.uri }}
-              style={{ width: displayW, height: displayH, opacity: TRACING_OPACITY }}
+              style={{ width: displayW, height: displayH, opacity: tracingOpacity }}
             />
           </View>
         </View>
@@ -339,29 +363,10 @@ export default function EditorScreen({ image, onClose }) {
   );
 }
 
-function Chip({ label, active, onPress }) {
-  return (
-    <Pressable onPress={onPress} style={[styles.toggle, active && styles.toggleActive]}>
-      <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
-function ExportButton({ label, onPress, disabled }) {
-  return (
-    <Pressable
-      onPress={onPress}
-      disabled={disabled}
-      style={[styles.exportButton, disabled && styles.exportButtonDisabled]}
-    >
-      <Text style={styles.exportButtonText}>{label}</Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.paper,
   },
   header: {
     flexDirection: 'row',
@@ -370,96 +375,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  headerTitle: {
-    color: '#f5f5f7',
-    fontSize: 17,
-    fontWeight: '700',
-  },
   headerAction: {
-    color: '#4f7cff',
-    fontSize: 15,
-    fontWeight: '600',
+    color: colors.accent,
+    fontSize: 14,
+    fontWeight: '700',
   },
   canvasArea: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.canvasMat,
+  },
+  canvas: {
+    backgroundColor: colors.paper,
   },
   controls: {
     paddingHorizontal: 16,
-    paddingBottom: 20,
-  },
-  toggleRow: {
-    alignItems: 'center',
-    paddingVertical: 6,
+    paddingTop: 10,
+    paddingBottom: 18,
     gap: 8,
   },
-  divider: {
-    width: 1,
-    height: 20,
-    backgroundColor: '#3a3a42',
-    marginHorizontal: 4,
+  tabs: {
+    flexDirection: 'row',
+    gap: 8,
   },
-  toggle: {
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: '#2a2a31',
-  },
-  toggleActive: {
-    backgroundColor: '#4f7cff',
-  },
-  toggleText: {
-    color: '#9a9aa5',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  toggleTextActive: {
-    color: '#f5f5f7',
+  row: {
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 2,
   },
   swatch: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 2,
-    borderColor: '#3a3a42',
+    borderColor: colors.paperEdge,
   },
   swatchActive: {
-    borderColor: '#f5f5f7',
-  },
-  exportHint: {
-    color: '#9a9aa5',
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 6,
-    marginBottom: 10,
+    borderColor: colors.graphite,
   },
   exportRow: {
     flexDirection: 'row',
-    gap: 10,
-  },
-  exportButton: {
-    flex: 1,
-    backgroundColor: '#2a2a31',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  exportButtonDisabled: {
-    opacity: 0.5,
-  },
-  exportButtonText: {
-    color: '#f5f5f7',
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 17,
+    gap: 8,
   },
   busyOverlay: {
     ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(17, 17, 20, 0.5)',
+    backgroundColor: 'rgba(46, 42, 38, 0.45)',
   },
   offscreen: {
     position: 'absolute',

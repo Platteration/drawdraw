@@ -11,7 +11,7 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.root}>
-      <StatusBar style="light" />
+      <StatusBar style="dark" />
       {image ? (
         <EditorScreen image={image} onClose={() => setImage(null)} />
       ) : (
@@ -24,6 +24,6 @@ export default function App() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#111114',
+    backgroundColor: '#f4efe6',
   },
 });

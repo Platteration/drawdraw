@@ -1,7 +1,30 @@
 import React, { useRef } from 'react';
 import { PanResponder, StyleSheet, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+const SNAP_STEP = 45; // yaw snaps to the standard views
+const SNAP_WINDOW = 2.5; // degrees
+
+/**
+ * Pull yaw onto the nearest standard view when it lands close, and tick the
+ * haptic engine once on arrival so the snap is felt as well as seen.
+ */
+function snapYaw(yaw, lastSnap) {
+  const nearest = Math.round(yaw / SNAP_STEP) * SNAP_STEP;
+  if (Math.abs(yaw - nearest) <= SNAP_WINDOW) {
+    if (lastSnap.current !== nearest) {
+      lastSnap.current = nearest;
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
+    return nearest;
+  }
+  if (lastSnap.current !== null && Math.abs(yaw - lastSnap.current) > SNAP_WINDOW) {
+    lastSnap.current = null;
+  }
+  return yaw;
+}
 
 function touchGeometry(touches) {
   const t1 = touches[0];
@@ -28,6 +51,7 @@ export default function HeadGestureLayer({ mode, transform, onChange, width, hei
   live.current = { mode, transform, onChange, width, height };
 
   const base = useRef(null); // { transform, geo } snapshot at gesture start
+  const lastSnap = useRef(null); // yaw value most recently snapped to
 
   const responder = useRef(
     PanResponder.create({
@@ -72,13 +96,14 @@ export default function HeadGestureLayer({ mode, transform, onChange, width, hei
         } else {
           change({
             ...start,
-            yaw: start.yaw + dx * 0.4,
+            yaw: snapYaw(start.yaw + dx * 0.4, lastSnap),
             pitch: clamp(start.pitch + dy * 0.4, -90, 90),
           });
         }
       },
       onPanResponderRelease: () => {
         base.current = null;
+        lastSnap.current = null;
       },
     })
   ).current;

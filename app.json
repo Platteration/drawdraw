@@ -4,9 +4,9 @@
     "slug": "drawdraw",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "dark",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
-    "backgroundColor": "#111114",
+    "backgroundColor": "#f4efe6",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.platteration.drawdraw"

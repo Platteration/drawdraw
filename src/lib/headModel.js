@@ -106,7 +106,7 @@ function projectRing(pts, m) {
     const normal = [p[0] / (A * A), p[1] / (B * B), p[2] / (C * C)];
     const w = apply(m, p);
     const wn = apply(m, normal);
-    return { x: w[0], y: w[1], visible: wn[2] > 0 };
+    return { x: w[0], y: w[1], z: w[2], visible: wn[2] > 0 };
   });
 }
 
@@ -160,7 +160,8 @@ function silhouette(m) {
     const c = Math.cos(t);
     const s = Math.sin(t);
     const r = 1 / Math.sqrt(s00 * c * c + 2 * s01 * c * s + s11 * s * s);
-    pts.push({ x: r * c, y: r * s });
+    // The silhouette is the rim of the form: neither near nor far.
+    pts.push({ x: r * c, y: r * s, z: 0, visible: true });
   }
   return { points: pts, closed: true };
 }
@@ -171,7 +172,7 @@ function silhouette(m) {
  * Returns { front, back, outline } where front/back are arrays of
  * { points, closed } polylines and outline is the silhouette ellipse.
  */
-export function buildHeadWireframe(yaw, pitch, roll) {
+export function buildHeadWireframe(yaw, pitch, roll, elements) {
   const m = rotationMatrix(yaw, pitch, roll);
   const front = [];
   const back = [];
@@ -185,3 +186,6 @@ export function buildHeadWireframe(yaw, pitch, roll) {
 }
 
 export const HEAD_HEIGHT_UNITS = 2 * B;
+
+/** Largest distance any model point can sit from the center, for depth cues. */
+export const MAX_RADIUS = Math.max(A, B, C);

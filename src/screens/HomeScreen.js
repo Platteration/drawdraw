@@ -1,6 +1,39 @@
 import React, { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import Svg, { Path } from 'react-native-svg';
+
+import { colors, radius } from '../theme';
+import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
+
+/** Small static ¾-view head, drawn with the real model, as the app's mark. */
+function HeadMark({ size = 132 }) {
+  const wire = buildHeadWireframe(38, 8, 0);
+  const ppu = (size * 0.86) / HEAD_HEIGHT_UNITS;
+  const toPath = ({ points, closed }) =>
+    points
+      .map((p, i) => `${i ? 'L' : 'M'}${(size / 2 + p.x * ppu).toFixed(1)} ${(size / 2 - p.y * ppu).toFixed(1)}`)
+      .join('') + (closed ? 'Z' : '');
+  return (
+    <Svg width={size} height={size}>
+      {wire.back.map((p, i) => (
+        <Path
+          key={`b${i}`}
+          d={toPath(p)}
+          stroke={colors.accent}
+          strokeOpacity={0.3}
+          strokeWidth={1.6}
+          strokeDasharray="4 4"
+          fill="none"
+        />
+      ))}
+      <Path d={toPath(wire.outline)} stroke={colors.accent} strokeWidth={1.9} fill="none" />
+      {wire.front.map((p, i) => (
+        <Path key={`f${i}`} d={toPath(p)} stroke={colors.accent} strokeWidth={1.9} fill="none" />
+      ))}
+    </Svg>
+  );
+}
 
 export default function HomeScreen({ onImagePicked }) {
   const [busy, setBusy] = useState(false);
@@ -24,11 +57,7 @@ export default function HomeScreen({ onImagePicked }) {
         Alert.alert('Permission needed', 'Allow photo access to pick a portrait.');
         return;
       }
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'],
-        quality: 1,
-      });
-      handleResult(result);
+      handleResult(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
     } finally {
       setBusy(false);
     }
@@ -43,8 +72,7 @@ export default function HomeScreen({ onImagePicked }) {
         Alert.alert('Permission needed', 'Allow camera access to take a portrait.');
         return;
       }
-      const result = await ImagePicker.launchCameraAsync({ quality: 1 });
-      handleResult(result);
+      handleResult(await ImagePicker.launchCameraAsync({ quality: 1 }));
     } finally {
       setBusy(false);
     }
@@ -52,19 +80,21 @@ export default function HomeScreen({ onImagePicked }) {
 
   return (
     <View style={styles.container}>
+      <HeadMark />
       <Text style={styles.logo}>DrawDraw</Text>
       <Text style={styles.tagline}>
-        Load a portrait and a 3D thirds head — chin to nose, nose to brow, brow to crown — is laid
-        over it. Turn it to match the pose through a full 360°, then export the guide with the
-        photo, on its own as a transparent layer, or as a faded tracing layer for any drawing app.
+        The three-segment head — chin to nose, nose to brow, brow to crown — in three dimensions,
+        laid over your portrait and turnable through a full circle.
       </Text>
 
-      <Pressable style={[styles.button, styles.primary]} onPress={pickFromLibrary} disabled={busy}>
-        <Text style={styles.buttonText}>Choose a portrait</Text>
-      </Pressable>
-      <Pressable style={[styles.button, styles.secondary]} onPress={takePhoto} disabled={busy}>
-        <Text style={styles.buttonText}>Take a photo</Text>
-      </Pressable>
+      <View style={styles.buttons}>
+        <Pressable style={[styles.button, styles.primary]} onPress={pickFromLibrary} disabled={busy}>
+          <Text style={styles.buttonText}>Choose a portrait</Text>
+        </Pressable>
+        <Pressable style={[styles.button, styles.secondary]} onPress={takePhoto} disabled={busy}>
+          <Text style={[styles.buttonText, styles.secondaryText]}>Take a photo</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -74,38 +104,47 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: 34,
+    backgroundColor: colors.paper,
   },
   logo: {
-    color: '#f5f5f7',
-    fontSize: 40,
+    color: colors.graphite,
+    fontSize: 36,
     fontWeight: '800',
-    letterSpacing: 1,
-    marginBottom: 16,
+    letterSpacing: 0.5,
+    marginTop: 8,
   },
   tagline: {
-    color: '#9a9aa5',
-    fontSize: 15,
-    lineHeight: 22,
+    color: colors.graphiteSoft,
+    fontSize: 14,
+    lineHeight: 21,
     textAlign: 'center',
-    marginBottom: 40,
+    marginTop: 12,
+    marginBottom: 36,
+  },
+  buttons: {
+    alignSelf: 'stretch',
+    gap: 12,
   },
   button: {
-    width: '100%',
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: radius.md,
+    paddingVertical: 15,
     alignItems: 'center',
-    marginBottom: 14,
   },
   primary: {
-    backgroundColor: '#4f7cff',
+    backgroundColor: colors.accent,
   },
   secondary: {
-    backgroundColor: '#2a2a31',
+    backgroundColor: colors.paperDeep,
+    borderWidth: 1,
+    borderColor: colors.paperEdge,
   },
   buttonText: {
-    color: '#f5f5f7',
-    fontSize: 16,
-    fontWeight: '600',
+    color: colors.paper,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  secondaryText: {
+    color: colors.graphite,
   },
 });
