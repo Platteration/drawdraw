@@ -12,12 +12,14 @@ import {
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
+import * as Haptics from 'expo-haptics';
 
 import GuideOverlay from '../components/GuideOverlay';
 import DraggableGuide from '../components/DraggableGuide';
 import HeadGuide from '../components/HeadGuide';
 import HeadGestureLayer from '../components/HeadGestureLayer';
 import TurnaroundSheet, { SHEET_SIZE } from '../components/TurnaroundSheet';
+import FitOverlay from '../components/FitOverlay';
 import { Chip, Divider, PrimaryButton, SectionLabel, SliderRow } from '../components/ui';
 import { colors, GUIDE_COLORS, type } from '../theme';
 import {
@@ -27,6 +29,7 @@ import {
   PROPORTION_PRESETS,
 } from '../lib/headModel';
 import { saveSettings } from '../lib/storage';
+import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 
 const THIRDS = [1 / 3, 2 / 3];
 const MAX_EXPORT_DIMENSION = 4096;
@@ -53,7 +56,8 @@ export default function EditorScreen({ project, onClose }) {
   // rotatable head, positioned over the portrait.
   const [showHead, setShowHead] = useState(saved.showHead ?? true);
   const [headTransform, setHeadTransform] = useState(saved.headTransform ?? DEFAULT_HEAD);
-  const [mode, setMode] = useState('rotate'); // 'rotate' | 'move' | 'lines'
+  const [mode, setMode] = useState('rotate'); // 'rotate' | 'move' | 'lines' | 'fit'
+  const [fitTaps, setFitTaps] = useState([]);
 
   // Which construction lines are drawn, and the head's proportions.
   const [elements, setElements] = useState(saved.elements ?? DEFAULT_ELEMENTS);
@@ -186,6 +190,33 @@ export default function EditorScreen({ project, onClose }) {
   const toggleElement = (key) => setElements((prev) => ({ ...prev, [key]: !prev[key] }));
   const setProportion = (key, value) => setProportions((prev) => ({ ...prev, [key]: value }));
 
+  const startFit = () => {
+    setFitTaps([]);
+    setMode('fit');
+    setShowHead(true);
+  };
+
+  const handleFitTap = (point) => {
+    const taps = [...fitTaps, point];
+    if (taps.length < FIT_STEPS.length) {
+      setFitTaps(taps);
+      Haptics.selectionAsync().catch(() => {});
+      return;
+    }
+    const solved = solveHeadFromTaps(taps, { width: displayW, height: displayH }, proportions);
+    setFitTaps([]);
+    setMode('rotate');
+    if (solved) {
+      setHeadTransform(solved);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    } else {
+      Alert.alert(
+        'Could not fit',
+        'Those three points were too close together to read a pose. Try again, tapping the chin, the base of the nose, and the brow.'
+      );
+    }
+  };
+
   const exportView = async (ref, name, size) => {
     if (busy || !ref.current) return;
     setBusy(true);
@@ -234,7 +265,8 @@ export default function EditorScreen({ project, onClose }) {
 
   const photoSize = { width: exportW, height: exportH };
   const ready = viewport && displayW > 0 && displayH > 0;
-  const headInteractive = showHead && mode !== 'lines';
+  const headInteractive = showHead && mode !== 'lines' && mode !== 'fit';
+  const linesEditable = mode === 'lines';
   const photoVisible = !practice || peeking;
 
   // Everything that goes on top of the photo, mirrored 1:1 in the exports.
@@ -289,7 +321,7 @@ export default function EditorScreen({ project, onClose }) {
               style={{ width: displayW, height: displayH, opacity: photoVisible ? 1 : 0 }}
             />
             {renderGuides()}
-            {!headInteractive &&
+            {linesEditable &&
               showHorizontal &&
               hGuides.map((fraction, i) => (
                 <DraggableGuide
@@ -301,7 +333,7 @@ export default function EditorScreen({ project, onClose }) {
                   onChange={(f) => updateH(i, f)}
                 />
               ))}
-            {!headInteractive &&
+            {linesEditable &&
               showVertical &&
               vGuides.map((fraction, i) => (
                 <DraggableGuide
@@ -313,6 +345,15 @@ export default function EditorScreen({ project, onClose }) {
                   onChange={(f) => updateV(i, f)}
                 />
               ))}
+            {mode === 'fit' && (
+              <FitOverlay
+                width={displayW}
+                height={displayH}
+                taps={fitTaps}
+                onTap={handleFitTap}
+                color={guideColor}
+              />
+            )}
             {headInteractive && (
               <HeadGestureLayer
                 mode={mode}
@@ -336,6 +377,7 @@ export default function EditorScreen({ project, onClose }) {
         {panel === 'guide' ? (
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              <Chip label="Fit to face" active={mode === 'fit'} onPress={startFit} />
               <Chip label="Rotate" active={mode === 'rotate'} onPress={() => setMode('rotate')} />
               <Chip label="Move" active={mode === 'move'} onPress={() => setMode('move')} />
               {anyLines && (
