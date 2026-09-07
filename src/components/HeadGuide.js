@@ -22,11 +22,12 @@ export default function HeadGuide({
   thickness,
   taper = true,
   elements,
+  proportions,
 }) {
   const { yaw, pitch, roll, x, y, scale } = transform;
   const wire = useMemo(
-    () => buildHeadWireframe(yaw, pitch, roll, elements),
-    [yaw, pitch, roll, elements]
+    () => buildHeadWireframe(yaw, pitch, roll, { elements, proportions }),
+    [yaw, pitch, roll, elements, proportions]
   );
 
   const ppu = (scale * height) / HEAD_HEIGHT_UNITS; // pixels per model unit

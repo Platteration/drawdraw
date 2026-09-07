@@ -18,7 +18,13 @@ import DraggableGuide from '../components/DraggableGuide';
 import HeadGuide from '../components/HeadGuide';
 import HeadGestureLayer from '../components/HeadGestureLayer';
 import { Chip, Divider, PrimaryButton, SectionLabel, SliderRow } from '../components/ui';
-import { colors, GUIDE_COLORS, radius, type } from '../theme';
+import { colors, GUIDE_COLORS, type } from '../theme';
+import {
+  DEFAULT_ELEMENTS,
+  DEFAULT_PROPORTIONS,
+  ELEMENTS,
+  PROPORTION_PRESETS,
+} from '../lib/headModel';
 
 const THIRDS = [1 / 3, 2 / 3];
 const MAX_EXPORT_DIMENSION = 4096;
@@ -39,6 +45,10 @@ export default function EditorScreen({ image, onClose }) {
   const [headTransform, setHeadTransform] = useState(DEFAULT_HEAD);
   const [mode, setMode] = useState('rotate'); // 'rotate' | 'move' | 'lines'
 
+  // Which construction lines are drawn, and the head's proportions.
+  const [elements, setElements] = useState(DEFAULT_ELEMENTS);
+  const [proportions, setProportions] = useState(DEFAULT_PROPORTIONS);
+
   // Optional flat 2D guide lines (fractions of the image), draggable.
   const [hGuides, setHGuides] = useState(THIRDS);
   const [vGuides, setVGuides] = useState(THIRDS);
@@ -49,7 +59,7 @@ export default function EditorScreen({ image, onClose }) {
   const [guideColor, setGuideColor] = useState(GUIDE_COLORS[0].value);
   const [lineWeight, setLineWeight] = useState(2);
   const [tracingOpacity, setTracingOpacity] = useState(0.3);
-  const [panel, setPanel] = useState('guide'); // 'guide' | 'style'
+  const [panel, setPanel] = useState('guide'); // 'guide' | 'build' | 'style'
 
   const [viewport, setViewport] = useState(null); // area available for the image
   const [busy, setBusy] = useState(false);
@@ -85,9 +95,13 @@ export default function EditorScreen({ image, onClose }) {
 
   const resetAll = () => {
     setHeadTransform(DEFAULT_HEAD);
+    setProportions(DEFAULT_PROPORTIONS);
     setHGuides(THIRDS);
     setVGuides(THIRDS);
   };
+
+  const toggleElement = (key) => setElements((prev) => ({ ...prev, [key]: !prev[key] }));
+  const setProportion = (key, value) => setProportions((prev) => ({ ...prev, [key]: value }));
 
   const exportView = async (ref, name) => {
     if (busy || !ref.current) return;
@@ -160,6 +174,8 @@ export default function EditorScreen({ image, onClose }) {
           width={displayW}
           height={displayH}
           transform={headTransform}
+          elements={elements}
+          proportions={proportions}
           color={guideColor}
           thickness={lineWeight}
         />
@@ -230,6 +246,7 @@ export default function EditorScreen({ image, onClose }) {
       <View style={styles.controls}>
         <View style={styles.tabs}>
           <Chip label="Guide" active={panel === 'guide'} onPress={() => setPanel('guide')} />
+          <Chip label="Build" active={panel === 'build'} onPress={() => setPanel('build')} />
           <Chip label="Style" active={panel === 'style'} onPress={() => setPanel('style')} />
         </View>
 
@@ -266,6 +283,66 @@ export default function EditorScreen({ image, onClose }) {
               />
               <Chip label="Center" active={showCenter} onPress={() => setShowCenter(!showCenter)} />
             </ScrollView>
+          </>
+        ) : panel === 'build' ? (
+          <>
+            <SectionLabel>Construction lines</SectionLabel>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              {ELEMENTS.filter((el) => !el.always).map((el) => (
+                <Chip
+                  key={el.key}
+                  label={el.label}
+                  active={!!elements[el.key]}
+                  onPress={() => toggleElement(el.key)}
+                />
+              ))}
+            </ScrollView>
+            <SectionLabel>Proportions</SectionLabel>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
+              {PROPORTION_PRESETS.map((preset) => (
+                <Chip
+                  key={preset.key}
+                  label={preset.label}
+                  onPress={() => setProportions(preset.values)}
+                />
+              ))}
+            </ScrollView>
+            <SliderRow
+              label="Brow line"
+              value={proportions.browY}
+              min={0}
+              max={0.9}
+              step={0.02}
+              onChange={(v) => setProportion('browY', v)}
+              format={(v) => v.toFixed(2)}
+            />
+            <SliderRow
+              label="Nose line"
+              value={proportions.noseY}
+              min={-0.9}
+              max={-0.1}
+              step={0.02}
+              onChange={(v) => setProportion('noseY', v)}
+              format={(v) => v.toFixed(2)}
+            />
+            <SliderRow
+              label="Width"
+              value={proportions.width}
+              min={0.8}
+              max={1.25}
+              step={0.01}
+              onChange={(v) => setProportion('width', v)}
+              format={(v) => v.toFixed(2)}
+            />
+            <SliderRow
+              label="Depth"
+              value={proportions.depth}
+              min={0.8}
+              max={1.25}
+              step={0.01}
+              onChange={(v) => setProportion('depth', v)}
+              format={(v) => v.toFixed(2)}
+            />
           </>
         ) : (
           <>
