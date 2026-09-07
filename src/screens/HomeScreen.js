@@ -1,18 +1,30 @@
-import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  Alert,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
+import { createProject, deleteProject, listProjects } from '../lib/storage';
 
 /** Small static ¾-view head, drawn with the real model, as the app's mark. */
-function HeadMark({ size = 132 }) {
-  const wire = buildHeadWireframe(38, 8, 0);
+function HeadMark({ size = 118 }) {
+  const wire = buildHeadWireframe(38, 8, 0, { elements: { center: true, eyeLine: true } });
   const ppu = (size * 0.86) / HEAD_HEIGHT_UNITS;
   const toPath = ({ points, closed }) =>
     points
-      .map((p, i) => `${i ? 'L' : 'M'}${(size / 2 + p.x * ppu).toFixed(1)} ${(size / 2 - p.y * ppu).toFixed(1)}`)
+      .map(
+        (p, i) =>
+          `${i ? 'L' : 'M'}${(size / 2 + p.x * ppu).toFixed(1)} ${(size / 2 - p.y * ppu).toFixed(1)}`
+      )
       .join('') + (closed ? 'Z' : '');
   return (
     <Svg width={size} height={size}>
@@ -35,17 +47,24 @@ function HeadMark({ size = 132 }) {
   );
 }
 
-export default function HomeScreen({ onImagePicked }) {
+export default function HomeScreen({ onOpenProject }) {
   const [busy, setBusy] = useState(false);
+  const [recents, setRecents] = useState([]);
 
-  const handleResult = (result) => {
+  const refresh = useCallback(() => {
+    listProjects().then(setRecents);
+  }, []);
+
+  useEffect(refresh, [refresh]);
+
+  const openAsset = async (result) => {
     if (result.canceled || !result.assets || result.assets.length === 0) return;
     const asset = result.assets[0];
     if (!asset.width || !asset.height) {
       Alert.alert('Unsupported image', 'Could not read the dimensions of that image.');
       return;
     }
-    onImagePicked({ uri: asset.uri, width: asset.width, height: asset.height });
+    onOpenProject(await createProject(asset));
   };
 
   const pickFromLibrary = async () => {
@@ -57,7 +76,7 @@ export default function HomeScreen({ onImagePicked }) {
         Alert.alert('Permission needed', 'Allow photo access to pick a portrait.');
         return;
       }
-      handleResult(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
+      await openAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
     } finally {
       setBusy(false);
     }
@@ -72,20 +91,36 @@ export default function HomeScreen({ onImagePicked }) {
         Alert.alert('Permission needed', 'Allow camera access to take a portrait.');
         return;
       }
-      handleResult(await ImagePicker.launchCameraAsync({ quality: 1 }));
+      await openAsset(await ImagePicker.launchCameraAsync({ quality: 1 }));
     } finally {
       setBusy(false);
     }
   };
 
+  const confirmDelete = (project) => {
+    Alert.alert('Remove drawing?', 'This removes the saved portrait and its guide setup.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteProject(project.id);
+          refresh();
+        },
+      },
+    ]);
+  };
+
   return (
     <View style={styles.container}>
-      <HeadMark />
-      <Text style={styles.logo}>DrawDraw</Text>
-      <Text style={styles.tagline}>
-        The three-segment head — chin to nose, nose to brow, brow to crown — in three dimensions,
-        laid over your portrait and turnable through a full circle.
-      </Text>
+      <View style={styles.hero}>
+        <HeadMark />
+        <Text style={styles.logo}>DrawDraw</Text>
+        <Text style={styles.tagline}>
+          The three-segment head — chin to nose, nose to brow, brow to crown — in three dimensions,
+          laid over your portrait and turnable through a full circle.
+        </Text>
+      </View>
 
       <View style={styles.buttons}>
         <Pressable style={[styles.button, styles.primary]} onPress={pickFromLibrary} disabled={busy}>
@@ -95,6 +130,25 @@ export default function HomeScreen({ onImagePicked }) {
           <Text style={[styles.buttonText, styles.secondaryText]}>Take a photo</Text>
         </Pressable>
       </View>
+
+      {recents.length > 0 && (
+        <View style={styles.recentsBlock}>
+          <Text style={styles.recentsLabel}>Recent</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentsRow}>
+            {recents.map((project) => (
+              <Pressable
+                key={project.id}
+                onPress={() => onOpenProject(project)}
+                onLongPress={() => confirmDelete(project)}
+                style={styles.thumb}
+              >
+                <Image source={{ uri: project.image.uri }} style={styles.thumbImage} />
+              </Pressable>
+            ))}
+          </ScrollView>
+          <Text style={styles.recentsHint}>Tap to reopen · hold to remove</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -102,28 +156,29 @@ export default function HomeScreen({ onImagePicked }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 34,
+    paddingHorizontal: 30,
     backgroundColor: colors.paper,
+  },
+  hero: {
+    alignItems: 'center',
   },
   logo: {
     color: colors.graphite,
-    fontSize: 36,
+    fontSize: 34,
     fontWeight: '800',
     letterSpacing: 0.5,
-    marginTop: 8,
+    marginTop: 6,
   },
   tagline: {
     color: colors.graphiteSoft,
     fontSize: 14,
     lineHeight: 21,
     textAlign: 'center',
-    marginTop: 12,
-    marginBottom: 36,
+    marginTop: 10,
+    marginBottom: 30,
   },
   buttons: {
-    alignSelf: 'stretch',
     gap: 12,
   },
   button: {
@@ -146,5 +201,37 @@ const styles = StyleSheet.create({
   },
   secondaryText: {
     color: colors.graphite,
+  },
+  recentsBlock: {
+    marginTop: 34,
+  },
+  recentsLabel: {
+    color: colors.graphiteFaint,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  recentsRow: {
+    gap: 10,
+  },
+  thumb: {
+    width: 62,
+    height: 62,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    backgroundColor: colors.paperDeep,
+    borderWidth: 1,
+    borderColor: colors.paperEdge,
+  },
+  thumbImage: {
+    width: '100%',
+    height: '100%',
+  },
+  recentsHint: {
+    color: colors.graphiteFaint,
+    fontSize: 11,
+    marginTop: 8,
   },
 });

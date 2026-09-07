@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +17,7 @@ import GuideOverlay from '../components/GuideOverlay';
 import DraggableGuide from '../components/DraggableGuide';
 import HeadGuide from '../components/HeadGuide';
 import HeadGestureLayer from '../components/HeadGestureLayer';
+import TurnaroundSheet, { SHEET_SIZE } from '../components/TurnaroundSheet';
 import { Chip, Divider, PrimaryButton, SectionLabel, SliderRow } from '../components/ui';
 import { colors, GUIDE_COLORS, type } from '../theme';
 import {
@@ -25,9 +26,12 @@ import {
   ELEMENTS,
   PROPORTION_PRESETS,
 } from '../lib/headModel';
+import { saveSettings } from '../lib/storage';
 
 const THIRDS = [1 / 3, 2 / 3];
 const MAX_EXPORT_DIMENSION = 4096;
+const TURNAROUND_SCALE = 3; // sheet is laid out small and captured at 3×
+const STEP_INTERVAL = 1100;
 
 const DEFAULT_HEAD = { yaw: 0, pitch: 0, roll: 0, x: 0.5, y: 0.45, scale: 0.6 };
 const VIEW_PRESETS = [
@@ -38,28 +42,43 @@ const VIEW_PRESETS = [
   { label: 'Below', yaw: 25, pitch: -22 },
 ];
 
-export default function EditorScreen({ image, onClose }) {
+/** Construction order used by step-by-step reveal. */
+const BUILD_ORDER = ELEMENTS.map((el) => el.key);
+
+export default function EditorScreen({ project, onClose }) {
+  const image = project.image;
+  const saved = project.settings || {};
+
   // 3D thirds head: chin→nose, nose→brow, brow→crown segment rings on a
   // rotatable head, positioned over the portrait.
-  const [showHead, setShowHead] = useState(true);
-  const [headTransform, setHeadTransform] = useState(DEFAULT_HEAD);
+  const [showHead, setShowHead] = useState(saved.showHead ?? true);
+  const [headTransform, setHeadTransform] = useState(saved.headTransform ?? DEFAULT_HEAD);
   const [mode, setMode] = useState('rotate'); // 'rotate' | 'move' | 'lines'
 
   // Which construction lines are drawn, and the head's proportions.
-  const [elements, setElements] = useState(DEFAULT_ELEMENTS);
-  const [proportions, setProportions] = useState(DEFAULT_PROPORTIONS);
+  const [elements, setElements] = useState(saved.elements ?? DEFAULT_ELEMENTS);
+  const [proportions, setProportions] = useState(saved.proportions ?? DEFAULT_PROPORTIONS);
 
   // Optional flat 2D guide lines (fractions of the image), draggable.
-  const [hGuides, setHGuides] = useState(THIRDS);
-  const [vGuides, setVGuides] = useState(THIRDS);
-  const [showHorizontal, setShowHorizontal] = useState(false);
-  const [showVertical, setShowVertical] = useState(false);
-  const [showCenter, setShowCenter] = useState(false);
+  const [hGuides, setHGuides] = useState(saved.hGuides ?? THIRDS);
+  const [vGuides, setVGuides] = useState(saved.vGuides ?? THIRDS);
+  const [showHorizontal, setShowHorizontal] = useState(saved.showHorizontal ?? false);
+  const [showVertical, setShowVertical] = useState(saved.showVertical ?? false);
+  const [showCenter, setShowCenter] = useState(saved.showCenter ?? false);
 
-  const [guideColor, setGuideColor] = useState(GUIDE_COLORS[0].value);
-  const [lineWeight, setLineWeight] = useState(2);
-  const [tracingOpacity, setTracingOpacity] = useState(0.3);
+  const [guideColor, setGuideColor] = useState(saved.guideColor ?? GUIDE_COLORS[0].value);
+  const [lineWeight, setLineWeight] = useState(saved.lineWeight ?? 2);
+  const [tracingOpacity, setTracingOpacity] = useState(saved.tracingOpacity ?? 0.3);
   const [panel, setPanel] = useState('guide'); // 'guide' | 'build' | 'style'
+
+  // Practice mode hides the photo so you draw from the guide alone.
+  const [practice, setPractice] = useState(false);
+  const [peeking, setPeeking] = useState(false);
+
+  // Step-by-step reveal: null when off, otherwise how far through the
+  // construction order we are.
+  const [step, setStep] = useState(null);
+  const [playing, setPlaying] = useState(false);
 
   const [viewport, setViewport] = useState(null); // area available for the image
   const [busy, setBusy] = useState(false);
@@ -67,6 +86,68 @@ export default function EditorScreen({ image, onClose }) {
   const combinedRef = useRef(null); // photo + guides
   const guidesOnlyRef = useRef(null); // guides on transparency
   const tracingRef = useRef(null); // faded photo on transparency
+  const turnaroundRef = useRef(null); // six-view contact sheet
+
+  // Elements actually drawn: the step sequence overrides manual toggles.
+  const activeElements = useMemo(() => {
+    if (step === null) return elements;
+    const revealed = {};
+    for (let i = 0; i <= step && i < BUILD_ORDER.length; i++) revealed[BUILD_ORDER[i]] = true;
+    return revealed;
+  }, [step, elements]);
+
+  useEffect(() => {
+    if (!playing) return undefined;
+    const id = setInterval(() => {
+      setStep((s) => {
+        if (s === null || s >= BUILD_ORDER.length - 1) {
+          setPlaying(false);
+          return s;
+        }
+        return s + 1;
+      });
+    }, STEP_INTERVAL);
+    return () => clearInterval(id);
+  }, [playing]);
+
+  // Persist the setup so reopening the portrait resumes exactly as left.
+  const settings = useMemo(
+    () => ({
+      showHead,
+      headTransform,
+      elements,
+      proportions,
+      hGuides,
+      vGuides,
+      showHorizontal,
+      showVertical,
+      showCenter,
+      guideColor,
+      lineWeight,
+      tracingOpacity,
+    }),
+    [
+      showHead,
+      headTransform,
+      elements,
+      proportions,
+      hGuides,
+      vGuides,
+      showHorizontal,
+      showVertical,
+      showCenter,
+      guideColor,
+      lineWeight,
+      tracingOpacity,
+    ]
+  );
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      saveSettings(project.id, settings).catch(() => {});
+    }, 600);
+    return () => clearTimeout(id);
+  }, [project.id, settings]);
 
   const guides = {
     horizontal: showHorizontal ? hGuides : [],
@@ -98,21 +179,18 @@ export default function EditorScreen({ image, onClose }) {
     setProportions(DEFAULT_PROPORTIONS);
     setHGuides(THIRDS);
     setVGuides(THIRDS);
+    setStep(null);
+    setPlaying(false);
   };
 
   const toggleElement = (key) => setElements((prev) => ({ ...prev, [key]: !prev[key] }));
   const setProportion = (key, value) => setProportions((prev) => ({ ...prev, [key]: value }));
 
-  const exportView = async (ref, name) => {
+  const exportView = async (ref, name, size) => {
     if (busy || !ref.current) return;
     setBusy(true);
     try {
-      const uri = await captureRef(ref, {
-        format: 'png',
-        quality: 1,
-        width: exportW,
-        height: exportH,
-      });
+      const uri = await captureRef(ref, { format: 'png', quality: 1, ...size });
 
       Alert.alert(name, 'Where do you want it?', [
         {
@@ -154,8 +232,10 @@ export default function EditorScreen({ image, onClose }) {
     }
   };
 
+  const photoSize = { width: exportW, height: exportH };
   const ready = viewport && displayW > 0 && displayH > 0;
   const headInteractive = showHead && mode !== 'lines';
+  const photoVisible = !practice || peeking;
 
   // Everything that goes on top of the photo, mirrored 1:1 in the exports.
   const renderGuides = () => (
@@ -174,7 +254,7 @@ export default function EditorScreen({ image, onClose }) {
           width={displayW}
           height={displayH}
           transform={headTransform}
-          elements={elements}
+          elements={activeElements}
           proportions={proportions}
           color={guideColor}
           thickness={lineWeight}
@@ -187,7 +267,7 @@ export default function EditorScreen({ image, onClose }) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable onPress={onClose} hitSlop={12}>
-          <Text style={styles.headerAction}>‹ New photo</Text>
+          <Text style={styles.headerAction}>‹ Portraits</Text>
         </Pressable>
         <Text style={type.title}>Three-segment head</Text>
         <Pressable onPress={resetAll} hitSlop={12}>
@@ -204,7 +284,10 @@ export default function EditorScreen({ image, onClose }) {
       >
         {ready && (
           <View style={[styles.canvas, { width: displayW, height: displayH }]}>
-            <Image source={{ uri: image.uri }} style={{ width: displayW, height: displayH }} />
+            <Image
+              source={{ uri: image.uri }}
+              style={{ width: displayW, height: displayH, opacity: photoVisible ? 1 : 0 }}
+            />
             {renderGuides()}
             {!headInteractive &&
               showHorizontal &&
@@ -282,6 +365,19 @@ export default function EditorScreen({ image, onClose }) {
                 onPress={() => setShowVertical(!showVertical)}
               />
               <Chip label="Center" active={showCenter} onPress={() => setShowCenter(!showCenter)} />
+              <Divider />
+              <Chip label="Practice" active={practice} onPress={() => setPractice(!practice)} />
+              {practice && (
+                <Pressable
+                  onPressIn={() => setPeeking(true)}
+                  onPressOut={() => setPeeking(false)}
+                  style={[styles.peek, peeking && styles.peekActive]}
+                >
+                  <Text style={[styles.peekText, peeking && styles.peekTextActive]}>
+                    Hold to peek
+                  </Text>
+                </Pressable>
+              )}
             </ScrollView>
           </>
         ) : panel === 'build' ? (
@@ -292,11 +388,42 @@ export default function EditorScreen({ image, onClose }) {
                 <Chip
                   key={el.key}
                   label={el.label}
-                  active={!!elements[el.key]}
+                  active={!!activeElements[el.key]}
+                  disabled={step !== null}
                   onPress={() => toggleElement(el.key)}
                 />
               ))}
             </ScrollView>
+
+            <SectionLabel>Build it up step by step</SectionLabel>
+            <View style={styles.row}>
+              <Chip
+                label={step === null ? 'Start' : 'Exit'}
+                active={step !== null}
+                onPress={() => {
+                  setStep(step === null ? 0 : null);
+                  setPlaying(false);
+                }}
+              />
+              {step !== null && (
+                <>
+                  <Chip label="‹" onPress={() => setStep((s) => Math.max(0, s - 1))} />
+                  <Chip
+                    label="›"
+                    onPress={() => setStep((s) => Math.min(BUILD_ORDER.length - 1, s + 1))}
+                  />
+                  <Chip
+                    label={playing ? 'Pause' : 'Play'}
+                    active={playing}
+                    onPress={() => setPlaying((p) => !p)}
+                  />
+                  <Text style={styles.stepLabel}>
+                    {step + 1}/{BUILD_ORDER.length} · {ELEMENTS[step].label}
+                  </Text>
+                </>
+              )}
+            </View>
+
             <SectionLabel>Proportions</SectionLabel>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
               {PROPORTION_PRESETS.map((preset) => (
@@ -387,18 +514,31 @@ export default function EditorScreen({ image, onClose }) {
             label={'Photo\n+ guide'}
             tone="quiet"
             disabled={busy || !ready}
-            onPress={() => exportView(combinedRef, 'Photo with guide')}
+            onPress={() => exportView(combinedRef, 'Photo with guide', photoSize)}
           />
           <PrimaryButton
             label={'Guide only\ntransparent'}
             disabled={busy || !ready}
-            onPress={() => exportView(guidesOnlyRef, 'Transparent guide')}
+            onPress={() => exportView(guidesOnlyRef, 'Transparent guide', photoSize)}
           />
+        </View>
+        <View style={styles.exportRow}>
           <PrimaryButton
             label={'Tracing\nlayer'}
             tone="quiet"
             disabled={busy || !ready}
-            onPress={() => exportView(tracingRef, 'Tracing layer')}
+            onPress={() => exportView(tracingRef, 'Tracing layer', photoSize)}
+          />
+          <PrimaryButton
+            label={'Turnaround\nsix views'}
+            tone="quiet"
+            disabled={busy}
+            onPress={() =>
+              exportView(turnaroundRef, 'Turnaround sheet', {
+                width: SHEET_SIZE.width * TURNAROUND_SCALE,
+                height: SHEET_SIZE.height * TURNAROUND_SCALE,
+              })
+            }
           />
         </View>
       </View>
@@ -411,31 +551,41 @@ export default function EditorScreen({ image, onClose }) {
 
       {/* Off-screen views captured for export. They mirror the on-screen
           overlay exactly and are scaled up to the source resolution. */}
-      {ready && (
-        <View style={styles.offscreen} pointerEvents="none">
-          <View ref={combinedRef} collapsable={false} style={{ width: displayW, height: displayH }}>
-            <Image source={{ uri: image.uri }} style={{ width: displayW, height: displayH }} />
-            {renderGuides()}
-          </View>
-          <View
-            ref={guidesOnlyRef}
-            collapsable={false}
-            style={{ width: displayW, height: displayH, backgroundColor: 'transparent' }}
-          >
-            {renderGuides()}
-          </View>
-          <View
-            ref={tracingRef}
-            collapsable={false}
-            style={{ width: displayW, height: displayH, backgroundColor: 'transparent' }}
-          >
-            <Image
-              source={{ uri: image.uri }}
-              style={{ width: displayW, height: displayH, opacity: tracingOpacity }}
-            />
-          </View>
+      <View style={styles.offscreen} pointerEvents="none">
+        {ready && (
+          <>
+            <View ref={combinedRef} collapsable={false} style={{ width: displayW, height: displayH }}>
+              <Image source={{ uri: image.uri }} style={{ width: displayW, height: displayH }} />
+              {renderGuides()}
+            </View>
+            <View
+              ref={guidesOnlyRef}
+              collapsable={false}
+              style={{ width: displayW, height: displayH, backgroundColor: 'transparent' }}
+            >
+              {renderGuides()}
+            </View>
+            <View
+              ref={tracingRef}
+              collapsable={false}
+              style={{ width: displayW, height: displayH, backgroundColor: 'transparent' }}
+            >
+              <Image
+                source={{ uri: image.uri }}
+                style={{ width: displayW, height: displayH, opacity: tracingOpacity }}
+              />
+            </View>
+          </>
+        )}
+        <View ref={turnaroundRef} collapsable={false}>
+          <TurnaroundSheet
+            elements={activeElements}
+            proportions={proportions}
+            color={guideColor}
+            thickness={lineWeight}
+          />
         </View>
-      )}
+      </View>
     </View>
   );
 }
@@ -477,9 +627,34 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   row: {
+    flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     paddingVertical: 2,
+  },
+  stepLabel: {
+    color: colors.graphiteSoft,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  peek: {
+    borderRadius: 18,
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: colors.accent,
+  },
+  peekActive: {
+    backgroundColor: colors.accent,
+  },
+  peekText: {
+    color: colors.accent,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  peekTextActive: {
+    color: colors.paper,
   },
   swatch: {
     width: 28,

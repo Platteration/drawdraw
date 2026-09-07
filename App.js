@@ -4,18 +4,19 @@ import { StatusBar } from 'expo-status-bar';
 
 import HomeScreen from './src/screens/HomeScreen';
 import EditorScreen from './src/screens/EditorScreen';
+import { colors } from './src/theme';
 
 export default function App() {
-  // image: null | { uri, width, height }
-  const [image, setImage] = useState(null);
+  // project: null | { id, image: { uri, width, height }, settings }
+  const [project, setProject] = useState(null);
 
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
-      {image ? (
-        <EditorScreen image={image} onClose={() => setImage(null)} />
+      {project ? (
+        <EditorScreen project={project} onClose={() => setProject(null)} />
       ) : (
-        <HomeScreen onImagePicked={setImage} />
+        <HomeScreen onOpenProject={setProject} />
       )}
     </SafeAreaView>
   );
@@ -24,6 +25,6 @@ export default function App() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    backgroundColor: '#f4efe6',
+    backgroundColor: colors.paper,
   },
 });
