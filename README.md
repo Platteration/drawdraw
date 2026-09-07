@@ -87,6 +87,20 @@ npx expo start
 Scan the QR code with [Expo Go](https://expo.dev/go) on an iOS or Android device. Exports,
 haptics and the share sheet need a real device.
 
+## Development
+
+```bash
+npm test          # unit tests for the head model, fit solver and filenames
+npm run icons     # regenerate assets/ from the head model
+```
+
+The geometry and solver are pure modules with no React Native imports, so they
+are tested directly: rotation orthonormality, finite output across the full
+sphere of orientations and every proportion preset, hidden-line splitting, the
+two signals the fit reads, and the solver's recovery, noise tolerance and
+refusal of degenerate input. CI runs the tests, bundles for both platforms, and
+checks that `assets/` still matches what the model generates.
+
 ## Building standalone apps
 
 ```bash
@@ -123,7 +137,14 @@ src/components/TurnaroundSheet.js   Six-view contact sheet
 src/components/GuideOverlay.js      Flat 2D guide lines
 src/components/DraggableGuide.js    Drag handles for the 2D lines
 src/components/ui.js                Chips, sliders, buttons
+
+tools/make-icons.mjs            Renders assets/ from the head model
 ```
+
+App icons and the splash mark are generated from `src/lib/headModel.js` rather
+than checked in as opaque art, so the app's mark and its subject cannot drift
+apart. The generator is standard library only — an analytic-coverage line
+rasterizer and a minimal PNG encoder over `node:zlib`.
 
 The 3D guide has no GL or engine dependency: `headModel.js` rotates and orthographically
 projects the head analytically (the silhouette is the projected quadric of the rotated
