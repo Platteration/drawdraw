@@ -1,6 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import Slider from '@react-native-community/slider';
+import Slider from './Slider';
 
 import { colors, radius, type } from '../theme';
 
@@ -31,16 +31,11 @@ export function SliderRow({ label, value, min, max, step, onChange, format }) {
       <Text style={styles.sliderLabel}>{label}</Text>
       <Slider
         accessibilityLabel={label}
-        accessibilityValue={{ now: value, min, max }}
-        style={styles.slider}
-        minimumValue={min}
-        maximumValue={max}
+        min={min}
+        max={max}
         step={step}
         value={value}
-        onValueChange={onChange}
-        minimumTrackTintColor={colors.accent}
-        maximumTrackTintColor={colors.paperEdge}
-        thumbTintColor={colors.accent}
+        onChange={onChange}
       />
       <Text style={styles.sliderValue}>{format ? format(value) : value.toFixed(2)}</Text>
     </View>
@@ -106,10 +101,6 @@ const styles = StyleSheet.create({
     ...type.label,
     color: colors.graphiteSoft,
     width: 74,
-  },
-  slider: {
-    flex: 1,
-    height: 32,
   },
   sliderValue: {
     ...type.label,

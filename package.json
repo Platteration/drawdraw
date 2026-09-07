@@ -9,11 +9,13 @@
     "web": "expo start --web",
     "test": "jest",
     "icons": "node tools/make-icons.mjs",
-    "icons:check": "node tools/make-icons.mjs --check"
+    "icons:check": "node tools/make-icons.mjs --check",
+    "build:web": "expo export --platform web --output-dir .web-build",
+    "e2e": "npm run build:web && node e2e/smoke.mjs"
   },
   "dependencies": {
+    "@expo/metro-runtime": "~5.0.5",
     "@react-native-async-storage/async-storage": "^2.1.2",
-    "@react-native-community/slider": "^4.5.6",
     "expo": "~53.0.9",
     "expo-file-system": "~18.1.11",
     "expo-haptics": "~14.1.4",
@@ -23,14 +25,17 @@
     "expo-splash-screen": "^0.30.10",
     "expo-status-bar": "~2.2.3",
     "react": "19.0.0",
+    "react-dom": "^19.0.0",
     "react-native": "0.79.6",
     "react-native-svg": "^15.11.2",
-    "react-native-view-shot": "4.0.3"
+    "react-native-view-shot": "4.0.3",
+    "react-native-web": "^0.20.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",
     "jest": "^29.7.0",
-    "jest-expo": "~53.0.0"
+    "jest-expo": "~53.0.0",
+    "playwright": "^1.49.1"
   },
   "private": true,
   "jest": {

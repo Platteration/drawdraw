@@ -383,6 +383,11 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
           <Chip label="Style" active={panel === 'style'} onPress={() => setPanel('style')} />
         </View>
 
+        <ScrollView
+          style={styles.panel}
+          contentContainerStyle={styles.panelContent}
+          showsVerticalScrollIndicator={false}
+        >
         {panel === 'guide' ? (
           <>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
@@ -568,6 +573,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
           </>
         )}
 
+        </ScrollView>
+
         <SectionLabel>Export · PNG at full resolution</SectionLabel>
         <View style={styles.exportRow}>
           <PrimaryButton
@@ -689,6 +696,14 @@ const styles = StyleSheet.create({
   tabs: {
     flexDirection: 'row',
     gap: 8,
+  },
+  // Cap the panel so a tall tab scrolls rather than squeezing the photo.
+  panel: {
+    maxHeight: 190,
+  },
+  panelContent: {
+    gap: 8,
+    paddingBottom: 4,
   },
   row: {
     flexDirection: 'row',
