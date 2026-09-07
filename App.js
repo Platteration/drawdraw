@@ -33,7 +33,7 @@ export default function App() {
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
-      {onboarded === false ? (
+      {onboarded === null ? null : onboarded === false ? (
         <OnboardingScreen onDone={finishOnboarding} />
       ) : project ? (
         <EditorScreen

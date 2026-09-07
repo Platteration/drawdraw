@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 
+import { portraitExtension } from './filenames';
+
 const INDEX_KEY = 'drawdraw.projects.v1';
 const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
 
@@ -40,8 +42,7 @@ export async function createProject(asset) {
   let uri = asset.uri;
   try {
     await ensureDir();
-    const ext = (asset.uri.split('.').pop() || 'jpg').split('?')[0].slice(0, 4);
-    const dest = `${PORTRAIT_DIR}${id}.${ext}`;
+    const dest = `${PORTRAIT_DIR}${id}.${portraitExtension(asset.uri)}`;
     await FileSystem.copyAsync({ from: asset.uri, to: dest });
     uri = dest;
   } catch {

@@ -639,14 +639,16 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             </View>
           </>
         )}
-        <View ref={turnaroundRef} collapsable={false}>
-          <TurnaroundSheet
-            elements={activeElements}
-            proportions={proportions}
-            color={guideColor}
-            thickness={lineWeight}
-          />
-        </View>
+        {pro && (
+          <View ref={turnaroundRef} collapsable={false}>
+            <TurnaroundSheet
+              elements={activeElements}
+              proportions={proportions}
+              color={guideColor}
+              thickness={lineWeight}
+            />
+          </View>
+        )}
       </View>
     </View>
   );
