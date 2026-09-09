@@ -2,6 +2,21 @@
 
 Two independent reviewers read every first-party file in this repository; a third then re-read each security or bug claim against the code and tried to refute it. Only claims that survived that check are listed as findings; the ones that did not are recorded at the end so they are not re-raised.
 
+## Status — what has been fixed
+
+These findings are now fixed on `claude/repo-review-security-baiyud`, each with a regression test:
+
+- **VER-1**
+- **SEC-1**
+- **SEC-2**
+- **SEC-3**
+- **BUG-5**
+- **BUG-6**
+
+The rest of this document is the review as written, and the fixed items are left in place so the reasoning behind each change stays with it.
+
+Repository hardening applied here as well: every GitHub Action is pinned to a commit rather than a floating tag, each workflow declares a least-privilege `permissions` block, and a Dependabot config, a licence and a security policy are in place.
+
 ## Summary
 
 DrawDraw is a well-built Expo/React Native portrait-drawing app: it overlays a parametric 3D Loomis-style construction head on a photo, recovers the head's pose from three taps with a Procrustes + orientation-search solver, and exports transparent PNG drawing layers. The engineering is unusually disciplined for a side project — pure dependency-free geometry and solver modules with real numerical tests, app icons generated from the same model that draws the guide, and a Playwright smoke test that measures where the fitted guide actually lands against a synthetic portrait laid out on known thirds. Its maturity gap is entirely at the edges rather than in the core: it is the last repo in the portfolio on Expo SDK 53 (siblings are all on SDK 57 / RN 0.86.3 / React 19.2.3), the only one in plain JavaScript with no typecheck step, the only one pinned to a now-EOL Node 20 in CI, and it carries all 20 npm advisories (8 HIGH — image-size DoS through metro, postcss, playwright) that the SDK upgrade closes. The headline recommendations are: (1) walk SDK 53 to 57 one SDK at a time, which is a real migration and not a version bump — expo-file-system's whole API changed in SDK 54, react-native-view-shot needs a 4.x to 5.x major for the new architecture, and Android edge-to-edge is now unconditional while App.js still uses react-native's iOS-only SafeAreaView; (2) add TypeScript, ESLint and a typecheck/lint/audit gate to CI to match the siblings; and (3) close the app-store readiness gaps — there is no eas.json despite the README telling you to run eas build, no LICENSE or privacy policy, a hardcoded $7.99 price that never asks the store, and a light-only palette whose muted greys fail WCAG AA.
