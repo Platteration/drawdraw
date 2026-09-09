@@ -27,6 +27,10 @@ before pushing.
   space, rotated, projected orthographically, then split into visible and
   hidden runs. Pure, dependency-free, and covered by tests.
 - `src/lib/fitSolver.js` — recovers a head pose from three taps. Pure, tested.
+- `src/lib/exportSize.js` — turns a wanted export size in pixels into the
+  options `react-native-view-shot` actually reads. iOS takes them as points
+  and rasterises at the screen scale, so a pixel count there is multiplied by
+  the device scale. Pure, tested.
 - `src/components/HeadGuide.js` — renders the model with `react-native-svg`.
   Used both on screen and inside the off-screen export views, which is what
   keeps exports identical to what you see.

@@ -1,5 +1,14 @@
-import React, { useRef, useState } from 'react';
-import { Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  BackHandler,
+  Dimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
@@ -75,6 +84,20 @@ export default function OnboardingScreen({ onDone }) {
     scroller.current?.scrollTo({ x: next * width, animated: true });
     setPage(next);
   };
+
+  // Android Back steps back through the pages rather than closing the app.
+  // On the first page there is nowhere to go, so the system handles it.
+  // Android only: the handler is a no-op stub on iOS and logs an error on
+  // react-native-web.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (page <= 0) return false;
+      goTo(page - 1);
+      return true;
+    });
+    return () => sub.remove();
+  }, [page]);
 
   return (
     <View style={styles.container}>

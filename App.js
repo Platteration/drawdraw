@@ -31,6 +31,11 @@ export default function App() {
   };
 
   return (
+    // React Native's SafeAreaView only insets on iOS. Android is kept out from
+    // under the status and gesture bars by the system instead, which is why
+    // `android.edgeToEdgeEnabled` is false in app.json: turning it back on
+    // would draw the header and the export row under the system bars, and
+    // nothing in the tree supplies insets to compensate.
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
       {onboarded === null ? null : onboarded === false ? (

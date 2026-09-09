@@ -2,7 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Image,
+  PixelRatio,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,6 +31,7 @@ import {
   ELEMENTS,
   PROPORTION_PRESETS,
 } from '../lib/headModel';
+import { captureSize } from '../lib/exportSize';
 import { saveSettings } from '../lib/storage';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 
@@ -160,6 +164,25 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     return () => clearTimeout(id);
   }, [project.id, settings]);
 
+  // Android's hardware/gesture Back. Without a subscriber it falls through to
+  // the default handler and closes the app instead of leaving the editor. The
+  // editor has its own shallow stack: a fit in progress is backed out of first,
+  // so three-tap fits are not silently discarded. Android only: the handler is
+  // a no-op stub on iOS and logs an error on react-native-web.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (mode === 'fit') {
+        setFitTaps([]);
+        setMode('rotate');
+        return true;
+      }
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [mode, onClose]);
+
   const guides = {
     horizontal: showHorizontal ? hGuides : [],
     vertical: [...(showVertical ? vGuides : []), ...(showCenter ? [0.5] : [])],
@@ -224,20 +247,32 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     }
   };
 
+  // `size` is the wanted output in PIXELS; captureSize turns it into whatever
+  // unit this platform's view-shot expects (see src/lib/exportSize.js).
   const exportView = async (ref, name, size) => {
     if (busy || !ref.current) return;
     setBusy(true);
     try {
-      const uri = await captureRef(ref, { format: 'png', quality: 1, ...size });
+      const uri = await captureRef(ref, {
+        format: 'png',
+        quality: 1,
+        ...captureSize(size, { platform: Platform.OS, pixelRatio: PixelRatio.get() }),
+      });
 
       Alert.alert(name, 'Where do you want it?', [
         {
           text: 'Save to Photos',
           onPress: async () => {
             try {
-              const permission = await MediaLibrary.requestPermissionsAsync();
+              // Add-only: the app never reads or enumerates the library, so
+              // it asks for the write scope alone (no 'All Photos' grant, and
+              // no runtime prompt at all on Android 13+).
+              const permission = await MediaLibrary.requestPermissionsAsync(true);
               if (!permission.granted) {
-                Alert.alert('Permission needed', 'Allow photo library access to save exports.');
+                Alert.alert(
+                  'Permission needed',
+                  'Allow DrawDraw to add photos to your library to save exports.'
+                );
                 return;
               }
               await MediaLibrary.saveToLibraryAsync(uri);

@@ -67,15 +67,15 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
     onOpenProject(await createProject(asset));
   };
 
+  // No library permission is requested: the picker runs out of process
+  // (PHPickerViewController on iOS, PickVisualMedia on Android) and hands back
+  // only the one image the user chose. Asking would grant read access to the
+  // whole camera roll for nothing, and a refusal would lock the user out of the
+  // app's main entry point with no way back from inside it.
   const pickFromLibrary = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission needed', 'Allow photo access to pick a portrait.');
-        return;
-      }
       await openAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
     } finally {
       setBusy(false);

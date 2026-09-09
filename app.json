@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.platteration.drawdraw",
-      "edgeToEdgeEnabled": true,
+      "edgeToEdgeEnabled": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#f4efe6"
@@ -24,7 +24,8 @@
         "expo-image-picker",
         {
           "photosPermission": "DrawDraw needs access to your photos so you can pick a portrait to overlay drawing guides on.",
-          "cameraPermission": "DrawDraw needs camera access so you can take a portrait photo to overlay drawing guides on."
+          "cameraPermission": "DrawDraw needs camera access so you can take a portrait photo to overlay drawing guides on.",
+          "microphonePermission": false
         }
       ],
       [
