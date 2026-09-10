@@ -31,6 +31,9 @@ before pushing.
   options `react-native-view-shot` actually reads. iOS takes them as points
   and rasterises at the screen scale, so a pixel count there is multiplied by
   the device scale. Pure, tested.
+- `src/lib/projectShape.js` — checks what comes back out of storage. Anything
+  that does not hold up is dropped so the caller's own default applies; it
+  invents nothing and never completes an element set. Pure, tested.
 - `src/components/HeadGuide.js` — renders the model with `react-native-svg`.
   Used both on screen and inside the off-screen export views, which is what
   keeps exports identical to what you see.

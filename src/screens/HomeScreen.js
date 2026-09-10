@@ -64,7 +64,17 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
       Alert.alert('Unsupported image', 'Could not read the dimensions of that image.');
       return;
     }
-    onOpenProject(await createProject(asset));
+    const project = await createProject(asset);
+    if (project.ephemeral) {
+      // The durable copy failed, so this portrait only lasts as long as the
+      // system keeps the picker's own file. Better to say so than to leave a
+      // Recent thumbnail that goes blank later with no way to repair it.
+      Alert.alert(
+        'Opened, but not saved',
+        'This portrait could not be copied into DrawDraw, so it will not appear under Recent. Your guide setup will not be kept either.'
+      );
+    }
+    onOpenProject(project);
   };
 
   // No library permission is requested: the picker runs out of process

@@ -21,6 +21,7 @@ jest.mock('../../lib/storage', () => ({
 }));
 
 import * as ImagePicker from 'expo-image-picker';
+import { createProject } from '../../lib/storage';
 import HomeScreen from '../HomeScreen';
 
 async function mount() {
@@ -69,5 +70,32 @@ describe('choosing a portrait', () => {
     expect(ImagePicker.requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
     expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalled();
+  });
+});
+
+describe('a portrait that could not be copied anywhere durable', () => {
+  it('is opened, but the user is told it will not be in Recent', async () => {
+    const asset = { uri: 'file:///cache/IMG_1.jpg', width: 100, height: 200 };
+    ImagePicker.launchImageLibraryAsync.mockResolvedValueOnce({ canceled: false, assets: [asset] });
+    // storage refuses to index a project whose durable copy failed, because a
+    // Recent entry pointing into the OS cache goes blank and cannot be fixed.
+    createProject.mockResolvedValueOnce({ id: 'p1', image: asset, settings: null, ephemeral: true });
+
+    const { onOpenProject, pressByLabel } = await mount();
+    await pressByLabel('Choose a portrait');
+
+    expect(onOpenProject).toHaveBeenCalledTimes(1); // it still opens this session
+    expect(Alert.alert).toHaveBeenCalledTimes(1); // and it says so, rather than failing silently
+  });
+
+  it('says nothing at all when the copy worked', async () => {
+    const asset = { uri: 'file:///cache/IMG_2.jpg', width: 100, height: 200 };
+    ImagePicker.launchImageLibraryAsync.mockResolvedValueOnce({ canceled: false, assets: [asset] });
+
+    const { onOpenProject, pressByLabel } = await mount();
+    await pressByLabel('Choose a portrait');
+
+    expect(onOpenProject).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 });

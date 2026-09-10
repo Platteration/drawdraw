@@ -17,8 +17,13 @@ export default function App() {
   const [project, setProject] = useState(null);
   const [onboarded, setOnboarded] = useState(null); // null while loading
   const [paywall, setPaywall] = useState(false);
-  const { pro, purchase, restore } = useEntitlements();
+  const { pro, ready: entitlementsRead, purchase, restore } = useEntitlements();
 
+  // Nothing is rendered until both the onboarding flag and the stored
+  // entitlement have been read. `pro` starts false, so rendering earlier shows
+  // a paying customer the free build for a frame — the guide visibly loses its
+  // Pro construction lines and then gains them back, and the home screen
+  // offers to sell them something they already own.
   useEffect(() => {
     AsyncStorage.getItem(ONBOARDED_KEY)
       .then((v) => setOnboarded(v === '1'))
@@ -38,7 +43,7 @@ export default function App() {
     // nothing in the tree supplies insets to compensate.
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
-      {onboarded === null ? null : onboarded === false ? (
+      {onboarded === null || !entitlementsRead ? null : onboarded === false ? (
         <OnboardingScreen onDone={finishOnboarding} />
       ) : project ? (
         <EditorScreen

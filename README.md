@@ -87,10 +87,15 @@ npx expo start
 Scan the QR code with [Expo Go](https://expo.dev/go) on an iOS or Android device. Exports,
 haptics and the share sheet need a real device.
 
+Expo Go ships only the current Expo SDK, and this app is still on SDK 53, so a current
+Expo Go will refuse to open it. Until that upgrade lands, use a development build —
+`npx expo run:ios` or `npx expo run:android` — which is what the exports and the share
+sheet want anyway.
+
 ## Development
 
 ```bash
-npm test          # unit tests for the head model, fit solver and filenames
+npm test          # unit tests: head model, fit solver, storage, entitlements, screens
 npm run e2e       # build for web and drive the app in a real browser
 npm run icons     # regenerate assets/ from the head model
 ```

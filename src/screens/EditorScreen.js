@@ -12,7 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { captureRef } from 'react-native-view-shot';
+import { captureRef, releaseCapture } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
@@ -157,12 +157,34 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     ]
   );
 
+  // Debounced autosave. The timer id doubles as "there is an unsaved change":
+  // the cleanup below cancels the pending write on every keystroke-sized edit,
+  // and only the write itself clears the ref.
+  const pendingSave = useRef(null);
+  const latestSettings = useRef(settings);
+
   useEffect(() => {
-    const id = setTimeout(() => {
+    latestSettings.current = settings;
+    pendingSave.current = setTimeout(() => {
+      pendingSave.current = null;
       saveSettings(project.id, settings).catch(() => {});
     }, 600);
-    return () => clearTimeout(id);
+    return () => clearTimeout(pendingSave.current);
   }, [project.id, settings]);
+
+  // Leaving the editor unmounts it, which used to cancel the pending write and
+  // silently discard anything changed in the last 600 ms — moving a slider and
+  // immediately tapping '‹ Portraits' is an ordinary thing to do. Mount-scoped
+  // so it flushes once, on the way out, rather than on every settings change.
+  useEffect(
+    () => () => {
+      if (!pendingSave.current) return;
+      clearTimeout(pendingSave.current);
+      pendingSave.current = null;
+      saveSettings(project.id, latestSettings.current).catch(() => {});
+    },
+    [project.id]
+  );
 
   // Android's hardware/gesture Back. Without a subscriber it falls through to
   // the default handler and closes the app instead of leaving the editor. The
@@ -259,45 +281,71 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         ...captureSize(size, { platform: Platform.OS, pixelRatio: PixelRatio.get() }),
       });
 
-      Alert.alert(name, 'Where do you want it?', [
-        {
-          text: 'Save to Photos',
-          onPress: async () => {
-            try {
-              // Add-only: the app never reads or enumerates the library, so
-              // it asks for the write scope alone (no 'All Photos' grant, and
-              // no runtime prompt at all on Android 13+).
-              const permission = await MediaLibrary.requestPermissionsAsync(true);
-              if (!permission.granted) {
-                Alert.alert(
-                  'Permission needed',
-                  'Allow DrawDraw to add photos to your library to save exports.'
-                );
-                return;
+      // captureRef writes the PNG to a temporary file and hands over the only
+      // reference to it. Nothing else deletes it on iOS, so without this each
+      // press of an export button leaves a full-resolution PNG behind for as
+      // long as the OS keeps the temp directory. Whichever way this alert
+      // ends, the file has been consumed by then.
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        // The web shim has no temp file and throws if asked to release one.
+        try {
+          releaseCapture(uri);
+        } catch {}
+      };
+
+      Alert.alert(
+        name,
+        'Where do you want it?',
+        [
+          {
+            text: 'Save to Photos',
+            onPress: async () => {
+              try {
+                // Add-only: the app never reads or enumerates the library, so
+                // it asks for the write scope alone (no 'All Photos' grant, and
+                // no runtime prompt at all on Android 13+).
+                const permission = await MediaLibrary.requestPermissionsAsync(true);
+                if (!permission.granted) {
+                  Alert.alert(
+                    'Permission needed',
+                    'Allow DrawDraw to add photos to your library to save exports.'
+                  );
+                  return;
+                }
+                await MediaLibrary.saveToLibraryAsync(uri);
+                Alert.alert('Saved', `${name} was saved to your photo library.`);
+              } catch (err) {
+                Alert.alert('Save failed', String(err?.message ?? err));
+              } finally {
+                release();
               }
-              await MediaLibrary.saveToLibraryAsync(uri);
-              Alert.alert('Saved', `${name} was saved to your photo library.`);
-            } catch (err) {
-              Alert.alert('Save failed', String(err?.message ?? err));
-            }
+            },
           },
-        },
-        {
-          text: 'Share…',
-          onPress: async () => {
-            try {
-              if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(uri, { mimeType: 'image/png' });
-              } else {
-                Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
+          {
+            text: 'Share…',
+            onPress: async () => {
+              try {
+                if (await Sharing.isAvailableAsync()) {
+                  await Sharing.shareAsync(uri, { mimeType: 'image/png' });
+                } else {
+                  Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
+                }
+              } catch (err) {
+                Alert.alert('Share failed', String(err?.message ?? err));
+              } finally {
+                release();
               }
-            } catch (err) {
-              Alert.alert('Share failed', String(err?.message ?? err));
-            }
+            },
           },
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+          { text: 'Cancel', style: 'cancel', onPress: release },
+        ],
+        // Android lets the dialog go by tapping outside it, which fires no
+        // button at all.
+        { onDismiss: release }
+      );
     } catch (err) {
       Alert.alert('Export failed', String(err?.message ?? err));
     } finally {
@@ -307,6 +355,9 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
 
   const photoSize = { width: exportW, height: exportH };
   const ready = viewport && displayW > 0 && displayH > 0;
+  // The off-screen guides are not drawn mid-gesture, so nothing may be
+  // captured mid-gesture either.
+  const exportsBusy = busy || !ready || interacting;
   const headInteractive = showHead && mode !== 'lines' && mode !== 'fit';
   const linesEditable = mode === 'lines';
   const photoVisible = !practice || peeking;
@@ -615,12 +666,12 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
           <PrimaryButton
             label={'Photo\n+ guide'}
             tone="quiet"
-            disabled={busy || !ready}
+            disabled={exportsBusy}
             onPress={() => exportView(combinedRef, 'Photo with guide', photoSize)}
           />
           <PrimaryButton
             label={'Guide only\ntransparent'}
-            disabled={busy || !ready}
+            disabled={exportsBusy}
             onPress={() => exportView(guidesOnlyRef, 'Transparent guide', photoSize)}
           />
         </View>
@@ -628,7 +679,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
           <PrimaryButton
             label={'Tracing\nlayer'}
             tone="quiet"
-            disabled={busy || !ready}
+            disabled={exportsBusy}
             onPress={() => exportView(tracingRef, 'Tracing layer', photoSize)}
           />
           <PrimaryButton
@@ -654,20 +705,27 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
       )}
 
       {/* Off-screen views captured for export. They mirror the on-screen
-          overlay exactly and are scaled up to the source resolution. */}
+          overlay exactly and are scaled up to the source resolution.
+
+          Their guides sit out the gesture. Draft mode makes the on-screen
+          guide cheap while the head is being dragged, but these two were
+          rebuilding at full quality on every touch frame — the same work,
+          twice over, for a capture that cannot happen until the finger is
+          lifted. They come back the moment it is, and the export buttons are
+          disabled meanwhile, so an export is still always full quality. */}
       <View style={styles.offscreen} pointerEvents="none">
         {ready && (
           <>
             <View ref={combinedRef} collapsable={false} style={{ width: displayW, height: displayH }}>
               <Image source={{ uri: image.uri }} style={{ width: displayW, height: displayH }} />
-              {renderGuides()}
+              {!interacting && renderGuides()}
             </View>
             <View
               ref={guidesOnlyRef}
               collapsable={false}
               style={{ width: displayW, height: displayH, backgroundColor: 'transparent' }}
             >
-              {renderGuides()}
+              {!interacting && renderGuides()}
             </View>
             <View
               ref={tracingRef}

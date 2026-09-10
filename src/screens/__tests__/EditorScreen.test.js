@@ -10,6 +10,7 @@ import { Alert, BackHandler, PixelRatio, Platform } from 'react-native';
 
 jest.mock('react-native-view-shot', () => ({
   captureRef: jest.fn(async () => 'file:///tmp/export.png'),
+  releaseCapture: jest.fn(),
 }));
 jest.mock('expo-media-library', () => ({
   requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
@@ -26,8 +27,10 @@ jest.mock('expo-haptics', () => ({
 }));
 jest.mock('../../lib/storage', () => ({ saveSettings: jest.fn(async () => {}) }));
 
-import { captureRef } from 'react-native-view-shot';
+import { captureRef, releaseCapture } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
+import { saveSettings } from '../../lib/storage';
+import HeadGuide from '../../components/HeadGuide';
 import EditorScreen from '../EditorScreen';
 
 const MAX_EXPORT_DIMENSION = 4096; // EditorScreen's own cap
@@ -57,14 +60,14 @@ afterEach(async () => {
 });
 
 /** Mount the editor on a given platform and screen scale, canvas measured. */
-async function mountEditor({ platform = 'ios', pixelRatio = 3, image = PHOTO } = {}) {
+async function mountEditor({ platform = 'ios', pixelRatio = 3, image = PHOTO, pro = true } = {}) {
   Platform.OS = platform;
   jest.spyOn(PixelRatio, 'get').mockReturnValue(pixelRatio);
   const onClose = jest.fn();
   let tree;
   await act(async () => {
     tree = renderer.create(
-      <EditorScreen project={{ id: 'p1', image, settings: {} }} onClose={onClose} pro />,
+      <EditorScreen project={{ id: 'p1', image, settings: {} }} onClose={onClose} pro={pro} />,
       { createNodeMock: () => ({}) } // give the off-screen views a ref to capture
     );
   });
@@ -202,5 +205,136 @@ describe('Android hardware back', () => {
     // The iOS handler is a no-op stub and the web one logs an error, which
     // the smoke test counts as a failure.
     expect(BackHandler.addEventListener).not.toHaveBeenCalled();
+  });
+});
+
+describe('the captured temp file', () => {
+  /** The alert captureRef's result is offered through, and its options. */
+  const exportAlert = () => {
+    const [, , buttons, options] = Alert.alert.mock.calls[0];
+    return { buttons, options, button: (text) => buttons.find((b) => b.text === text) };
+  };
+
+  it.each(['Save to Photos', 'Share…', 'Cancel'])(
+    'is released after %s',
+    async (text) => {
+      const { tree } = await mountEditor();
+      await press(tree, 'Photo\n+ guide');
+      const uri = await captureRef.mock.results[0].value;
+
+      await act(async () => {
+        await exportAlert().button(text).onPress();
+      });
+
+      // captureRef writes a full-resolution PNG to the temp directory and
+      // hands over the only reference to it; on iOS nothing else ever
+      // deletes it, so an export that is not released is an export leaked.
+      expect(releaseCapture).toHaveBeenCalledWith(uri);
+      expect(releaseCapture).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('is released when Android dismisses the dialog with no button at all', async () => {
+    const { tree } = await mountEditor({ platform: 'android' });
+    await press(tree, 'Photo\n+ guide');
+
+    const { options } = exportAlert();
+    expect(typeof options?.onDismiss).toBe('function');
+    await act(async () => options.onDismiss());
+    expect(releaseCapture).toHaveBeenCalledWith('file:///tmp/export.png');
+  });
+
+  it('is released exactly once even if the alert reports twice', async () => {
+    const { tree } = await mountEditor({ platform: 'android' });
+    await press(tree, 'Photo\n+ guide');
+    const { button, options } = exportAlert();
+
+    await act(async () => {
+      await button('Cancel').onPress();
+      options.onDismiss();
+    });
+    expect(releaseCapture).toHaveBeenCalledTimes(1);
+  });
+
+  it('is still released when saving to the library fails', async () => {
+    MediaLibrary.saveToLibraryAsync.mockRejectedValueOnce(new Error('disk full'));
+    const { tree } = await mountEditor();
+    await press(tree, 'Photo\n+ guide');
+    await act(async () => {
+      await exportAlert().button('Save to Photos').onPress();
+    });
+    expect(releaseCapture).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('the off-screen export views', () => {
+  /** Every guide currently being rendered at full quality, anywhere. */
+  const fullQuality = (tree) =>
+    tree.root.findAllByType(HeadGuide).filter((n) => !n.props.draft);
+  const gesture = (tree) =>
+    tree.root.findAll((n) => n.props && typeof n.props.onInteractingChange === 'function')[0];
+  const exportButton = (tree) =>
+    tree.root.findAll((n) => n.props && n.props.label === 'Photo\n+ guide')[0];
+
+  it('sit out the gesture, so draft mode is not paid for three times over', async () => {
+    // Free tier, so the only guides in the tree are the on-screen one and the
+    // two off-screen capture views (the turnaround sheet is Pro-only).
+    const { tree } = await mountEditor({ pro: false });
+    expect(fullQuality(tree)).toHaveLength(3);
+
+    await act(async () => gesture(tree).props.onInteractingChange(true));
+    // Nothing is rebuilt at 96 samples with the depth-taper split while a
+    // finger is down: the on-screen guide goes to draft and the two capture
+    // views, which cannot be captured mid-gesture anyway, stop rendering.
+    expect(fullQuality(tree)).toHaveLength(0);
+    const onScreen = tree.root.findAllByType(HeadGuide);
+    expect(onScreen).toHaveLength(1);
+    expect(onScreen[0].props.draft).toBe(true);
+
+    await act(async () => gesture(tree).props.onInteractingChange(false));
+    expect(fullQuality(tree)).toHaveLength(3);
+  });
+
+  it('cannot be captured while their guides are missing', async () => {
+    const { tree } = await mountEditor({ pro: false });
+    expect(exportButton(tree).props.disabled).toBe(false);
+
+    await act(async () => gesture(tree).props.onInteractingChange(true));
+    // Exports always render at full quality; the way that stays true is that
+    // there is no way to ask for one while the guides are on their way back.
+    expect(exportButton(tree).props.disabled).toBe(true);
+
+    await act(async () => gesture(tree).props.onInteractingChange(false));
+    expect(exportButton(tree).props.disabled).toBe(false);
+  });
+});
+
+describe('the debounced autosave', () => {
+  it('is flushed when the editor is closed inside the debounce window', async () => {
+    const { tree } = await mountEditor();
+    await press(tree, 'Center'); // shows the center guide line
+    expect(saveSettings).not.toHaveBeenCalled(); // still inside the 600 ms wait
+
+    await act(async () => tree.unmount());
+    mounted.length = 0; // already unmounted; afterEach must not do it again
+
+    // 'Pick up where you left off' has to include the last thing you did
+    // before tapping '‹ Portraits'.
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    const [id, settings] = saveSettings.mock.calls[0];
+    expect(id).toBe('p1');
+    expect(settings.showCenter).toBe(true);
+  });
+
+  it('writes nothing on the way out when nothing changed', async () => {
+    const { tree } = await mountEditor();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700)); // let it settle
+    });
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+
+    await act(async () => tree.unmount());
+    mounted.length = 0;
+    expect(saveSettings).toHaveBeenCalledTimes(1); // no second, duplicate write
   });
 });

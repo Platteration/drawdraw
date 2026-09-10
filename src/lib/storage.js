@@ -2,9 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 
 import { portraitExtension } from './filenames';
+import { sanitizeProjects } from './projectShape';
 
 const INDEX_KEY = 'drawdraw.projects.v1';
 const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
+const MAX_PROJECTS = 30;
 
 /**
  * Projects keep the portrait plus everything about how the guide was fitted
@@ -13,6 +15,12 @@ const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
  * The picker hands back a URI in the app's cache, which the OS is free to
  * clear, so the image is copied into the documents directory on import and
  * the project references that durable copy.
+ *
+ * Every copy this module makes is owned by the index: a portrait leaves disk
+ * when its record leaves the index, whether that is an explicit delete or the
+ * oldest entry falling off the end of the list. Otherwise a heavy user
+ * accumulates full-resolution copies of people's faces that nothing in the
+ * app can reach and nothing but reinstalling can clear.
  */
 
 async function ensureDir() {
@@ -22,11 +30,18 @@ async function ensureDir() {
   }
 }
 
+/** Delete a portrait copy this module made. Ignores anything it did not. */
+async function removePortrait(uri) {
+  if (typeof uri !== 'string' || !uri.startsWith(PORTRAIT_DIR)) return;
+  await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+}
+
 export async function listProjects() {
   try {
     const raw = await AsyncStorage.getItem(INDEX_KEY);
-    const projects = raw ? JSON.parse(raw) : [];
-    return Array.isArray(projects) ? projects : [];
+    // Written by this app, but not necessarily by this build of it, and not
+    // necessarily completely. See projectShape.js.
+    return sanitizeProjects(raw ? JSON.parse(raw) : []);
   } catch {
     return [];
   }
@@ -36,15 +51,25 @@ async function writeIndex(projects) {
   await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(projects));
 }
 
-/** Copy a freshly picked image somewhere durable and create its project. */
+/**
+ * Copy a freshly picked image somewhere durable and create its project.
+ *
+ * When the copy fails the project is still returned so the editor opens on
+ * the picker's own URI, but it is flagged `ephemeral` and kept out of the
+ * index: writing it there would leave a permanent Recent entry pointing into
+ * a cache the OS is free to clear, with no way to repair it from inside the
+ * app. The caller is expected to say so.
+ */
 export async function createProject(asset) {
   const id = `p${Date.now().toString(36)}`;
   let uri = asset.uri;
+  let durable = false;
   try {
     await ensureDir();
     const dest = `${PORTRAIT_DIR}${id}.${portraitExtension(asset.uri)}`;
     await FileSystem.copyAsync({ from: asset.uri, to: dest });
     uri = dest;
+    durable = true;
   } catch {
     // Fall back to the original URI; the project still works this session.
   }
@@ -55,8 +80,14 @@ export async function createProject(asset) {
     image: { uri, width: asset.width, height: asset.height },
     settings: null,
   };
+
+  if (!durable) return { ...project, ephemeral: true };
+
   const projects = await listProjects();
-  await writeIndex([project, ...projects].slice(0, 30));
+  const all = [project, ...projects];
+  // Truncation drops the record; the copy on disk has to go with it.
+  await writeIndex(all.slice(0, MAX_PROJECTS));
+  for (const dropped of all.slice(MAX_PROJECTS)) await removePortrait(dropped.image?.uri);
   return project;
 }
 
@@ -72,8 +103,6 @@ export async function saveSettings(id, settings) {
 export async function deleteProject(id) {
   const projects = await listProjects();
   const target = projects.find((p) => p.id === id);
-  if (target?.image?.uri?.startsWith(PORTRAIT_DIR)) {
-    await FileSystem.deleteAsync(target.image.uri, { idempotent: true }).catch(() => {});
-  }
   await writeIndex(projects.filter((p) => p.id !== id));
+  await removePortrait(target?.image?.uri);
 }

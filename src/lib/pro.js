@@ -39,17 +39,25 @@ async function write(entitlements) {
 
 /**
  * Entitlement state. `pro` gates the paid surface; `purchase` and `restore`
- * go through the store provider and only grant on a resolved transaction.
+ * go through the store provider and grant only on a result that says the
+ * entitlement was actually acquired — see src/lib/purchases.js for the
+ * contract a real provider has to meet.
+ *
+ * `ready` is how a caller tells "not Pro" from "not read yet": `pro` starts
+ * false and the stored entitlement only arrives a tick later, so anything
+ * that gates on `pro` has to wait for this or it shows a paying customer the
+ * free build for a frame.
  */
 export function useEntitlements() {
   const [pro, setPro] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    read().then((e) => {
-      setPro(!!e.pro);
-      setReady(true);
-    });
+    read()
+      .then((e) => setPro(!!e.pro))
+      // The app holds its first frame until `ready`, so this must settle even
+      // if storage is unavailable — better a free build than a blank screen.
+      .finally(() => setReady(true));
   }, []);
 
   const grant = useCallback(async () => {
@@ -61,7 +69,11 @@ export function useEntitlements() {
   const purchase = useCallback(
     async (productId) => {
       const result = await purchases.purchase(productId);
-      await grant();
+      // A resolved promise is not a sale. Store SDKs routinely resolve with
+      // `userCancelled`, or with a deferred/pending transaction, rather than
+      // rejecting — granting on resolution alone would unlock Pro when the
+      // user backs out of the sheet.
+      if (result?.pro) await grant();
       return result;
     },
     [grant]
