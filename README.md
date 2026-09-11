@@ -129,10 +129,17 @@ their own Android manifests — expo-media-library alone declares the whole
 media-read set, images, video, audio and legacy storage — and the prebuild
 template adds the "display over other apps" overlay; none of it is used by an
 app that only ever writes one PNG, so `android.blockedPermissions` takes it back
-out. What ships is the camera, the vibrator, `INTERNET` — which expo-file-system
-declares and a development build needs to load its bundle, though nothing in
-`src/` ever opens a socket — and, on Android 12 and below, write access to save
-an export to Photos.
+out. What ships is the camera, the vibrator and, on Android 12 and below, write
+access to save an export to Photos. `INTERNET` is blocked with the rest:
+expo-file-system declares it, nothing in `src/` ever opens a socket, and it is
+the one permission that turns a malicious dependency from something that reads
+the app's own documents into something that sends them somewhere. A development
+build does need it — that is how Metro's bundle reaches the device — so
+`plugins/withDebugInternet.js` adds it back at prebuild, to
+`android/app/src/debug/AndroidManifest.xml` alone: the manifest merger gives a
+build-type source set higher priority than the main manifest, and the release
+variant never reads that file. It is the same split React Native's own template
+uses for its debug-only overlay permission.
 
 `android.allowBackup` is off. Expo's default turns it on, which would put the
 app's own full-resolution copies of the portraits into Android Auto Backup and
@@ -172,6 +179,8 @@ src/components/GuideOverlay.js      Flat 2D guide lines
 src/components/DraggableGuide.js    Drag handles for the 2D lines
 src/components/ui.js                Chips, sliders, buttons
 
+plugins/withDebugInternet.js    Config plugin: network access in the debug
+                                manifest only, never in the release build
 tools/make-icons.mjs            Renders assets/ from the head model
 ```
 

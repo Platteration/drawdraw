@@ -1,4 +1,9 @@
-import { DEFAULT_PROPORTIONS, HEAD_HEIGHT_UNITS, projectLandmarks } from './headModel';
+import {
+  DEFAULT_PROPORTIONS,
+  HEAD_HEIGHT_UNITS,
+  HEAD_OFFSET_RANGE,
+  projectLandmarks,
+} from './headModel';
 
 /**
  * Fit the 3D head to a portrait from three taps on the face's midline:
@@ -118,12 +123,17 @@ export function solveHeadFromTaps(taps, view, proportions = DEFAULT_PROPORTIONS)
   if (!best || !isFinite(best.scale) || best.scale <= 0) return null;
 
   const ppu = best.scale; // pixels per model unit
+  // The position is clamped like the scale is. Three taps inside a very
+  // elongated photo (past roughly 10:1) fit a centre several view-dimensions
+  // outside it, which is a position no gesture can reach and the stored-record
+  // sanitizer will not take back; clamping here keeps what is drawn, what is
+  // saved and what reopens the same thing.
   return {
     yaw: normalizeAngle(best.yaw),
     pitch: clamp(best.pitch, -90, 90),
     roll: normalizeAngle((best.angle * 180) / Math.PI),
-    x: best.tx / view.width,
-    y: -best.ty / view.height,
+    x: clamp(best.tx / view.width, ...HEAD_OFFSET_RANGE),
+    y: clamp(-best.ty / view.height, ...HEAD_OFFSET_RANGE),
     scale: clamp((ppu * HEAD_HEIGHT_UNITS) / view.height, 0.05, 4),
   };
 }

@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system';
 
 import { portraitExtension } from './filenames';
-import { sanitizeProjects } from './projectShape';
+import { hasTraversal, sanitizeProjects } from './projectShape';
 
 const INDEX_KEY = 'drawdraw.projects.v1';
 const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
@@ -30,9 +30,20 @@ async function ensureDir() {
   }
 }
 
-/** Delete a portrait copy this module made. Ignores anything it did not. */
+/**
+ * Delete a portrait copy this module made. Ignores anything it did not.
+ *
+ * The prefix is necessary and not sufficient: `${PORTRAIT_DIR}../../databases/
+ * RKStorage` starts with PORTRAIT_DIR and names a file two directories above
+ * it, which deleteAsync will happily resolve and remove — the app's own
+ * AsyncStorage database among the reachable targets. Nothing this module
+ * writes contains a `..`, so the containment is the prefix *and* the absence
+ * of one. sanitizeProject refuses such a URI on the way in as well; the two
+ * are deliberately redundant, because this is the call that deletes.
+ */
 async function removePortrait(uri) {
   if (typeof uri !== 'string' || !uri.startsWith(PORTRAIT_DIR)) return;
+  if (hasTraversal(uri)) return;
   await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
 }
 

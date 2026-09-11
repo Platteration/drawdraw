@@ -38,6 +38,11 @@ before pushing.
   Used both on screen and inside the off-screen export views, which is what
   keeps exports identical to what you see.
 - `src/screens/EditorScreen.js` — the editor; holds the guide state.
+- `plugins/withDebugInternet.js` — config plugin. `app.json` blocks every Android
+  permission the app does not use, `INTERNET` included; this adds `INTERNET` back
+  to `android/app/src/debug/AndroidManifest.xml` at prebuild, so a development
+  build can load its bundle and the release build still has no network
+  capability. `__tests__/appConfig.test.js` holds both halves.
 - `tools/make-icons.mjs` — renders `assets/` from `headModel.js`.
 - `e2e/smoke.mjs` — drives the real critical path in a browser and measures
   where the three-tap fit actually lands, against a synthetic portrait laid out

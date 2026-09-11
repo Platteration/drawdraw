@@ -19,8 +19,13 @@
  * change can be absorbed, and it is testable without a device.
  */
 
-import { DEFAULT_PROPORTIONS, ELEMENTS, PROPORTION_RANGES } from './headModel';
-import { GUIDE_COLORS } from '../theme';
+import {
+  DEFAULT_PROPORTIONS,
+  ELEMENTS,
+  HEAD_OFFSET_RANGE,
+  PROPORTION_RANGES,
+} from './headModel';
+import { GUIDE_COLORS, LINE_WEIGHT_RANGE, TRACING_OPACITY_RANGE } from '../theme';
 
 const ELEMENT_KEYS = ELEMENTS.map((el) => el.key);
 const PROPORTION_KEYS = Object.keys(DEFAULT_PROPORTIONS);
@@ -35,22 +40,25 @@ const COLOR_VALUES = GUIDE_COLORS.map((c) => c.value);
  * this module exists to stop — react-native-svg's PathParser throws on it.
  *
  * So each value is held to the range the code that writes it keeps. Scale is
- * clamped to [0.1, 3] by the pinch gesture (HeadGestureLayer.js:93) and to
- * [0.05, 4] by the three-tap solver (fitSolver.js:127), so the solver's is the
- * wider of the two. Pitch is clamped to +/-90 by both. A head is `scale`
- * view-heights tall, so a centre further than MAX_SCALE outside the view could
- * not put a stroke on screen. Yaw and roll are the exception: they accumulate
- * across gestures without ever being normalised, so a full-turn range would
- * drop a legitimate pose — a hundred turns is past anything a hand winds up
- * and still far inside where the conversion above stays finite.
+ * clamped to [0.1, 3] by the pinch gesture (HeadGestureLayer.js) and to
+ * [0.05, 4] by the three-tap solver (fitSolver.js), so the solver's is the
+ * wider of the two. Pitch is clamped to +/-90 by both. x and y are positions,
+ * and no geometry bounds them — a fit on a very elongated photo really does
+ * solve a centre several view-widths outside the view, with the head still
+ * crossing the screen — so both writers clamp them to HEAD_OFFSET_RANGE and
+ * this reads that same constant rather than reasoning about what could be
+ * visible. Yaw and roll are the exception: they accumulate across gestures
+ * without ever being normalised, so a full-turn range would drop a legitimate
+ * pose — a hundred turns is past anything a hand winds up and still far inside
+ * where the conversion above stays finite.
  */
 const MAX_SCALE = 4;
 const TRANSFORM_RANGES = {
   yaw: [-36000, 36000],
   pitch: [-90, 90],
   roll: [-36000, 36000],
-  x: [-MAX_SCALE, 1 + MAX_SCALE],
-  y: [-MAX_SCALE, 1 + MAX_SCALE],
+  x: HEAD_OFFSET_RANGE,
+  y: HEAD_OFFSET_RANGE,
   scale: [0.05, MAX_SCALE],
 };
 const TRANSFORM_KEYS = Object.keys(TRANSFORM_RANGES);
@@ -65,7 +73,16 @@ const MAX_GUIDES = 16;
 const isObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
 const isFinite_ = (v) => typeof v === 'number' && Number.isFinite(v);
 const isNonEmptyString = (v) => typeof v === 'string' && v.length > 0;
-const inRange = (v, [lo, hi]) => isFinite_(v) && v >= lo && v <= hi;
+/**
+ * A range is `[lo, hi]`, and a key that has none is not in range. Destructuring
+ * the second argument instead would throw a TypeError for a missing table
+ * entry, which listProjects' `catch { return [] }` (storage.js) turns into an
+ * empty library that the next write makes permanent — the one failure this
+ * module exists to absorb, reached by the most ordinary schema change there is
+ * (a new proportion added to DEFAULT_PROPORTIONS before its range).
+ */
+const inRange = (v, range) =>
+  Array.isArray(range) && isFinite_(v) && v >= range[0] && v <= range[1];
 
 /** Copy `key` from `from` to `into` only when `ok(value)` holds. */
 function keep(into, from, key, ok) {
@@ -144,10 +161,34 @@ export function sanitizeSettings(raw) {
     keep(out, raw, key, isBool);
   }
   keep(out, raw, 'guideColor', (v) => COLOR_VALUES.includes(v));
-  keep(out, raw, 'lineWeight', (v) => isFinite_(v) && v > 0);
-  keep(out, raw, 'tracingOpacity', (v) => isFinite_(v) && v > 0 && v <= 1);
+  // Both are slider values, and both are held to their own slider's range for
+  // the same reason the pose is: `lineWeight: 1.7e308` is finite and positive,
+  // and HeadGuide's depth taper multiplies it into Infinity, which neither
+  // renderer rejects and neither draws.
+  keep(out, raw, 'lineWeight', (v) => inRange(v, LINE_WEIGHT_RANGE));
+  keep(out, raw, 'tracingOpacity', (v) => inRange(v, TRACING_OPACITY_RANGE));
 
   return out;
+}
+
+/**
+ * A `..` path segment, in either spelling, in a URI or in a query string that
+ * gets decoded on the way to a file API. A URI that will not decode at all
+ * (`%` with nothing after it) counts as one: it is not something this app
+ * wrote, and what a native URI parser does with it is not worth finding out.
+ *
+ * Exported because the deletion guard in storage.js needs the same test — a
+ * prefix check alone is satisfied by a path that then climbs back out of the
+ * directory the prefix names.
+ */
+export function hasTraversal(uri) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(uri);
+  } catch {
+    return true;
+  }
+  return [uri, decoded].some((form) => form.split('/').some((seg) => seg === '..'));
 }
 
 /**
@@ -159,8 +200,19 @@ export function sanitizeSettings(raw) {
  * `https:` URI in the index makes an app that has no network code of its own
  * fetch a remote server once per launch. Dropping the record instead also
  * makes a portrait whose copy is gone self-healing.
+ *
+ * The scheme is not the whole of it. `removePortrait`'s guard is a prefix
+ * test, so `file:///…/portraits/../../databases/RKStorage` passes it while
+ * naming a file two directories above the one it checked; `deleteAsync`
+ * resolves the `..` and deletes what it finds, and the MAX_PROJECTS truncation
+ * fires that without anyone asking for a deletion at all. And an authority is
+ * a host, not a local file: `file://attacker.example/x.png` is no more ours
+ * than `https:` is. Both are refused here. The directory half of the invariant
+ * stays in storage.js, which is the module that knows where documentDirectory
+ * is; this one is pure on purpose.
  */
-const isLocalFileUri = (v) => isNonEmptyString(v) && v.startsWith('file://');
+const isLocalFileUri = (v) =>
+  isNonEmptyString(v) && v.startsWith('file:///') && !hasTraversal(v);
 
 /**
  * One record from the project index, or `null` if it cannot be opened at all.

@@ -47,6 +47,23 @@ export const PROPORTION_RANGES = {
 };
 
 /**
+ * How far the head's centre may sit from the view, in view widths (x) and view
+ * heights (y); the view's top-left corner is 0 and its bottom-right is 1.
+ *
+ * Nothing about the geometry bounds these: a three-tap fit on a very elongated
+ * photo genuinely solves a centre several view-widths outside the view, with
+ * the head still crossing the screen. So this is the app's own limit rather
+ * than a measurement, and both writers hold to it — the solver's return
+ * (fitSolver.js) and the drag gestures (HeadGestureLayer.js) — which is what
+ * lets the stored-record sanitizer reject a restored position outside it
+ * without discarding a pose the app itself produced. The number itself is a
+ * choice, not a derivation — far past anywhere a head is usefully placed, near
+ * enough that a lost head can be dragged back, and small enough that every
+ * multiply the renderer does with it stays finite.
+ */
+export const HEAD_OFFSET_RANGE = [-4, 5];
+
+/**
  * Proportion packs. The default adult head is exact thirds; children and
  * stylized heads carry a proportionally larger cranium, which pushes the
  * brow and nose lines down.

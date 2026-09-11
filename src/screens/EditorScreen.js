@@ -24,7 +24,13 @@ import HeadGestureLayer from '../components/HeadGestureLayer';
 import TurnaroundSheet, { SHEET_SIZE } from '../components/TurnaroundSheet';
 import FitOverlay from '../components/FitOverlay';
 import { Chip, Divider, PrimaryButton, SectionLabel, SliderRow } from '../components/ui';
-import { colors, GUIDE_COLORS, type } from '../theme';
+import {
+  colors,
+  GUIDE_COLORS,
+  LINE_WEIGHT_RANGE,
+  TRACING_OPACITY_RANGE,
+  type,
+} from '../theme';
 import {
   DEFAULT_ELEMENTS,
   DEFAULT_PROPORTIONS,
@@ -642,8 +648,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             <SliderRow
               label="Line weight"
               value={lineWeight}
-              min={1}
-              max={6}
+              min={LINE_WEIGHT_RANGE[0]}
+              max={LINE_WEIGHT_RANGE[1]}
               step={0.5}
               onChange={setLineWeight}
               format={(v) => `${v.toFixed(1)}px`}
@@ -651,8 +657,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             <SliderRow
               label="Tracing"
               value={tracingOpacity}
-              min={0.05}
-              max={0.85}
+              min={TRACING_OPACITY_RANGE[0]}
+              max={TRACING_OPACITY_RANGE[1]}
               step={0.05}
               onChange={setTracingOpacity}
               format={(v) => `${Math.round(v * 100)}%`}

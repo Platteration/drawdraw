@@ -2,7 +2,21 @@ import React, { useRef } from 'react';
 import { PanResponder, StyleSheet, View } from 'react-native';
 import * as Haptics from 'expo-haptics';
 
+import { HEAD_OFFSET_RANGE } from '../lib/headModel';
+
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/**
+ * A drag moves the head's centre, which nothing else bounds — it re-anchors on
+ * every gesture, so the offsets accumulate and the head can be pushed
+ * arbitrarily far from the photo and lost. Holding it to the range the stored
+ * pose is allowed (headModel.js) is both what keeps it reachable and what
+ * makes the sanitizer's bound the writer's own.
+ */
+const place = (start, dx, dy, w, h) => ({
+  x: clamp(start.x + dx / w, ...HEAD_OFFSET_RANGE),
+  y: clamp(start.y + dy / h, ...HEAD_OFFSET_RANGE),
+});
 
 const SNAP_STEP = 45; // yaw snaps to the standard views
 const SNAP_WINDOW = 2.5; // degrees
@@ -92,15 +106,9 @@ export default function HeadGestureLayer({
           const scale =
             startGeo.dist > 0 ? clamp(start.scale * (geo.dist / startGeo.dist), 0.1, 3) : start.scale;
           const roll = start.roll - ((geo.angle - startGeo.angle) * 180) / Math.PI;
-          change({
-            ...start,
-            scale,
-            roll,
-            x: start.x + dx / w,
-            y: start.y + dy / h,
-          });
+          change({ ...start, scale, roll, ...place(start, dx, dy, w, h) });
         } else if (m === 'move') {
-          change({ ...start, x: start.x + dx / w, y: start.y + dy / h });
+          change({ ...start, ...place(start, dx, dy, w, h) });
         } else {
           change({
             ...start,

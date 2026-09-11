@@ -25,6 +25,17 @@ export const GUIDE_COLORS = [
   { name: 'Sap', value: '#5d7f4e' },
 ];
 
+/**
+ * What the two appearance sliders may write. The editor builds them from these
+ * and the stored-record sanitizer holds a restored value to them, the way
+ * PROPORTION_RANGES does for the head: `lineWeight` becomes an SVG
+ * `strokeWidth`, where a number large enough to overflow the depth taper is
+ * accepted in silence and simply draws nothing, and `tracingOpacity` is the
+ * photo's own opacity underneath the guide.
+ */
+export const LINE_WEIGHT_RANGE = [1, 6];
+export const TRACING_OPACITY_RANGE = [0.05, 0.85];
+
 export const radius = {
   sm: 8,
   md: 12,
