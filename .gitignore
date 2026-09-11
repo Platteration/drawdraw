@@ -25,3 +25,7 @@ yarn-error.*
 
 # web build used by the e2e smoke test
 .web-build/
+
+# Secrets: ignore every .env variant, but keep the documented template.
+.env*
+!.env.example
