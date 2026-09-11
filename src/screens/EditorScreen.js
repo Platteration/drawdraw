@@ -30,6 +30,7 @@ import {
   DEFAULT_PROPORTIONS,
   ELEMENTS,
   PROPORTION_PRESETS,
+  PROPORTION_RANGES,
 } from '../lib/headModel';
 import { captureSize } from '../lib/exportSize';
 import { saveSettings } from '../lib/storage';
@@ -588,8 +589,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             <SliderRow
               label="Brow line"
               value={proportions.browY}
-              min={0}
-              max={0.9}
+              min={PROPORTION_RANGES.browY[0]}
+              max={PROPORTION_RANGES.browY[1]}
               step={0.02}
               onChange={(v) => setProportion('browY', v)}
               format={(v) => v.toFixed(2)}
@@ -597,8 +598,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             <SliderRow
               label="Nose line"
               value={proportions.noseY}
-              min={-0.9}
-              max={-0.1}
+              min={PROPORTION_RANGES.noseY[0]}
+              max={PROPORTION_RANGES.noseY[1]}
               step={0.02}
               onChange={(v) => setProportion('noseY', v)}
               format={(v) => v.toFixed(2)}
@@ -606,8 +607,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             <SliderRow
               label="Width"
               value={proportions.width}
-              min={0.8}
-              max={1.25}
+              min={PROPORTION_RANGES.width[0]}
+              max={PROPORTION_RANGES.width[1]}
               step={0.01}
               onChange={(v) => setProportion('width', v)}
               format={(v) => v.toFixed(2)}
@@ -615,8 +616,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             <SliderRow
               label="Depth"
               value={proportions.depth}
-              min={0.8}
-              max={1.25}
+              min={PROPORTION_RANGES.depth[0]}
+              max={PROPORTION_RANGES.depth[1]}
               step={0.01}
               onChange={(v) => setProportion('depth', v)}
               format={(v) => v.toFixed(2)}

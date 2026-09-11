@@ -123,7 +123,27 @@ eas build --platform ios
 eas build --platform android
 ```
 
-Photo library and camera permission strings are configured in `app.json`.
+Photo library and camera permission strings are configured in `app.json`, and so
+is everything the build deliberately does *not* ask for. The Expo modules bring
+their own Android manifests — expo-media-library alone declares the whole
+media-read set, images, video, audio and legacy storage — and the prebuild
+template adds the "display over other apps" overlay; none of it is used by an
+app that only ever writes one PNG, so `android.blockedPermissions` takes it back
+out. What ships is the camera, the vibrator, `INTERNET` — which expo-file-system
+declares and a development build needs to load its bundle, though nothing in
+`src/` ever opens a socket — and, on Android 12 and below, write access to save
+an export to Photos.
+
+`android.allowBackup` is off. Expo's default turns it on, which would put the
+app's own full-resolution copies of the portraits into Android Auto Backup and
+within reach of `adb backup` on Android 11 and below. For a photo taken with the
+in-app camera that copy is the only one in existence, so the default is what
+would send a face to a cloud account — from an app that has no network code of
+its own at all. The cost of turning it off is that the portrait list does not
+follow you to a new device. On iOS the documents directory is still covered by
+iCloud backup and there is no Expo API for excluding a file from it, so deleting
+a portrait (hold its thumbnail on the home screen) is what takes it out of the
+next backup.
 
 ## Project layout
 

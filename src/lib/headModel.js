@@ -35,6 +35,18 @@ export const DEFAULT_PROPORTIONS = {
 };
 
 /**
+ * What each proportion may be. The editor's sliders are built from these and
+ * the stored-record sanitizer holds a restored value to them, so a value that
+ * comes back out of storage cannot be one the app could never have written.
+ */
+export const PROPORTION_RANGES = {
+  width: [0.8, 1.25],
+  depth: [0.8, 1.25],
+  noseY: [-0.9, -0.1],
+  browY: [0, 0.9],
+};
+
+/**
  * Proportion packs. The default adult head is exact thirds; children and
  * stylized heads carry a proportionally larger cranium, which pushes the
  * brow and nose lines down.
