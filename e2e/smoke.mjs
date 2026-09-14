@@ -136,14 +136,23 @@ try {
       .map((s) => toSource(s.min))
       .filter((y) => Number.isFinite(y));
 
-    const near = (target) => level.some((y) => Math.abs(y - target) <= TOLERANCE);
+    const nearest = (target) => level.reduce(
+      (best, y) => (Math.abs(y - target) < Math.abs(best - target) ? y : best),
+      level[0] ?? Infinity
+    );
+    const checkLevel = (label, target) => {
+      const actual = nearest(target);
+      check(label, Math.abs(actual - target) <= TOLERANCE,
+        `${Number.isFinite(actual) ? actual.toFixed(1) : 'none'} vs ${target}`);
+    };
+
     check('crown lands on the portrait', Math.abs(toSource(outline.min) - PORTRAIT.crown) <= TOLERANCE,
       `${toSource(outline.min).toFixed(1)} vs ${PORTRAIT.crown}`);
     check('chin lands on the portrait', Math.abs(toSource(outline.max) - PORTRAIT.chin) <= TOLERANCE,
       `${toSource(outline.max).toFixed(1)} vs ${PORTRAIT.chin}`);
-    check('brow ring lands on the portrait', near(PORTRAIT.brow));
-    check('eye line lands on the portrait', near(PORTRAIT.eye));
-    check('nose ring lands on the portrait', near(PORTRAIT.nose));
+    checkLevel('brow ring lands on the portrait', PORTRAIT.brow);
+    checkLevel('eye line lands on the portrait', PORTRAIT.eye);
+    checkLevel('nose ring lands on the portrait', PORTRAIT.nose);
   }
 
   check('no browser errors', consoleErrors.length === 0, consoleErrors.join(' | '));
