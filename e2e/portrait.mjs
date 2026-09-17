@@ -15,12 +15,6 @@ export const PORTRAIT = {
   get brow() {
     return this.crown + (this.chin - this.crown) / 3;
   },
-  get eye() {
-    // The construction eye line is the equator of the model head (y = 0),
-    // halfway from crown to chin. Keep this separate from the painted eye
-    // ellipses below, which are only visual landmarks in the fixture.
-    return (this.crown + this.chin) / 2;
-  },
   get nose() {
     return this.crown + (2 * (this.chin - this.crown)) / 3;
   },
