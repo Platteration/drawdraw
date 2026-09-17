@@ -11,7 +11,7 @@ See README.md for what it does and how the pose fit works.
 ```bash
 npm install
 npx expo start          # run on a device via Expo Go
-npm test                # jest, via the jest-expo preset
+npm test                # jest, plain node environment (no Expo preset)
 npm run icons           # regenerate assets/ from the head model
 npm run e2e             # build for web and drive the app in a browser
 npx expo export --platform ios --platform android --output-dir .export-check

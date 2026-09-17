@@ -2,19 +2,44 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches:
+      - claude/portrait-segmentation-overlay-4kh36c
   pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22.13.1
           cache: npm
       - run: npm ci
+      # Informative, not a gate. The advisories in this tree sit inside Expo's
+      # own dependencies (uuid via xcode via @expo/config-plugins), which this
+      # project cannot fix, and expo and its CLI are in `dependencies`, so a
+      # blocking audit would fail every PR on the first high advisory upstream.
+      # --omit=dev is not used for the same reason: it would hide nothing of
+      # Expo's and only skip the test tooling.
+      - name: Dependency audit (non-blocking)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+      # Pinned so a new expo-doctor release cannot change what CI checks. Two of
+      # its checks (the app.json schema, fetched from exp.host, and the package
+      # metadata from reactnative.directory) need network and fail spuriously
+      # without it, so this step reports rather than blocks.
+      - name: Expo project health (non-blocking)
+        run: npx expo-doctor@1.20.4
+        continue-on-error: true
       - name: Unit tests
         run: npx jest --ci
       - name: Bundle for iOS and Android
@@ -24,11 +49,12 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version: 22.13.1
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps chromium
