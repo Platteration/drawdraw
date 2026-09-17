@@ -1,5 +1,7 @@
 # DrawDraw
 
+Read AGENTS.md first. It holds the working rules every coding agent follows in this repository; this file adds the notes specific to this project.
+
 Expo / React Native app (iOS + Android) that overlays a rotatable 3D
 three-segment construction head on a portrait photo and exports drawing layers.
 See README.md for what it does and how the pose fit works.
