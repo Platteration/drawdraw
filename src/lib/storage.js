@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { portraitExtension } from './filenames';
 
@@ -13,6 +13,10 @@ const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
  * The picker hands back a URI in the app's cache, which the OS is free to
  * clear, so the image is copied into the documents directory on import and
  * the project references that durable copy.
+ *
+ * SDK 57's main expo-file-system entry point uses the new File/Directory API;
+ * the async URI helpers below intentionally use the compatibility entry point
+ * until project storage is migrated as a unit.
  */
 
 async function ensureDir() {

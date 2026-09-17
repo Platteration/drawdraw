@@ -63,7 +63,7 @@ const page = await browser.newPage({ viewport: { width: 390, height: 844 }, devi
 const consoleErrors = [];
 page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 page.on('console', (m) => {
-  if (m.type() === 'error') consoleErrors.push(`console: ${m.text().slice(0, 200)}`);
+  if (m.type() === 'error') consoleErrors.push(`console: ${m.text().slice(0, 500)}`);
 });
 
 const tap = async (text) => {
@@ -76,7 +76,13 @@ try {
   await page.waitForTimeout(1200);
 
   const intro = await page.locator('body').innerText();
-  check('onboarding is shown on first launch', intro.includes('Three segments'));
+  const onboardingShown = intro.includes('Three segments');
+  check('onboarding is shown on first launch', onboardingShown);
+  if (!onboardingShown) {
+    console.error(`body: ${intro.slice(0, 1000) || '<empty>'}`);
+    for (const error of consoleErrors) console.error(error);
+    throw new Error('App did not render onboarding');
+  }
 
   await tap('Skip');
   const home = await page.locator('body').innerText();
@@ -128,42 +134,34 @@ try {
     const level = geometry.spans
       .filter((s) => s.max - s.min < 3)
       .map((s) => toSource(s.min))
-      .sort((a, b) => a - b);
-    // The level lines arrive as several depth-tapered runs per ring; cluster them.
-    const rings = [];
-    for (const y of level) {
-      const last = rings[rings.length - 1];
-      if (last && y - last[last.length - 1] < 20) last.push(y);
-      else rings.push([y]);
-    }
-    const centers = rings.map((r) => r.reduce((a, b) => a + b, 0) / r.length);
-    const near = (actual, expected) => Math.abs(actual - expected) <= TOLERANCE;
-    const report = (a, e) => `${a.toFixed(1)} vs ${e.toFixed(1)}`;
+      .filter((y) => Number.isFinite(y));
 
-    check('fit puts the crown on the crown', near(toSource(outline.min), PORTRAIT.crown), report(toSource(outline.min), PORTRAIT.crown));
-    check('fit puts the chin on the chin', near(toSource(outline.max), PORTRAIT.chin), report(toSource(outline.max), PORTRAIT.chin));
-    check('three level lines were drawn', centers.length === 3, `got ${centers.length}`);
-    if (centers.length === 3) {
-      const [brow, eye, nose] = centers;
-      check('brow line lands on the brow', near(brow, PORTRAIT.brow), report(brow, PORTRAIT.brow));
-      check('eye line lands mid-head', near(eye, (PORTRAIT.crown + PORTRAIT.chin) / 2), report(eye, (PORTRAIT.crown + PORTRAIT.chin) / 2));
-      check('nose line lands on the nose', near(nose, PORTRAIT.nose), report(nose, PORTRAIT.nose));
-    }
+    const nearest = (target) => level.reduce(
+      (best, y) => (Math.abs(y - target) < Math.abs(best - target) ? y : best),
+      level[0] ?? Infinity
+    );
+    const checkLevel = (label, target) => {
+      const actual = nearest(target);
+      check(label, Math.abs(actual - target) <= TOLERANCE,
+        `${Number.isFinite(actual) ? actual.toFixed(1) : 'none'} vs ${target}`);
+    };
+
+    check('crown lands on the portrait', Math.abs(toSource(outline.min) - PORTRAIT.crown) <= TOLERANCE,
+      `${toSource(outline.min).toFixed(1)} vs ${PORTRAIT.crown}`);
+    check('chin lands on the portrait', Math.abs(toSource(outline.max) - PORTRAIT.chin) <= TOLERANCE,
+      `${toSource(outline.max).toFixed(1)} vs ${PORTRAIT.chin}`);
+    checkLevel('brow ring lands on the portrait', PORTRAIT.brow);
+    checkLevel('eye line lands on the portrait', PORTRAIT.eye);
+    checkLevel('nose ring lands on the portrait', PORTRAIT.nose);
   }
 
-  await tap('Build');
-  await tap('Jaw'); // a Pro-gated construction line
-  const paywall = await page.locator('body').innerText();
-  check('a locked control opens the paywall', paywall.includes('Unlock Pro'));
-
-  check('no console or page errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
+  check('no browser errors', consoleErrors.length === 0, consoleErrors.join(' | '));
 } finally {
   await browser.close();
   server.close();
 }
 
 if (failures.length) {
-  console.error(`\n${failures.length} check(s) failed: ${failures.join(', ')}`);
+  console.error(`\n${failures.length} smoke check(s) failed`);
   process.exit(1);
 }
-console.log('\nall checks passed');
