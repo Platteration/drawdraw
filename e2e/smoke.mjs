@@ -7,7 +7,7 @@
  * against a portrait laid out on known thirds. Anything logged to the console
  * as an error along the way fails the run.
  *
- *   npm run e2e
+ *   npm run test:e2e
  */
 import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';

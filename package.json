@@ -1,6 +1,7 @@
 {
   "name": "drawdraw",
   "version": "1.0.0",
+  "license": "MIT",
   "main": "index.js",
   "scripts": {
     "start": "expo start",
@@ -8,10 +9,14 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "test": "jest",
+    "test:conventions": "node --test test/conventions.mjs",
+    "check": "npm test && npm run test:conventions",
     "icons": "node tools/make-icons.mjs",
     "icons:check": "node tools/make-icons.mjs --check",
     "build:web": "expo export --platform web --output-dir .web-build",
-    "e2e": "npm run build:web && node e2e/smoke.mjs"
+    "test:e2e": "npm run build:web && node e2e/smoke.mjs",
+    "test:all": "npm test && npm run test:e2e",
+    "e2e": "npm run test:e2e"
   },
   "dependencies": {
     "@expo/metro-runtime": "~5.0.5",
@@ -39,6 +44,9 @@
     "playwright": "^1.55.1"
   },
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "jest": {
     "preset": "jest-expo",
     "testMatch": [

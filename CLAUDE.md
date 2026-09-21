@@ -9,15 +9,16 @@ See README.md for what it does and how the pose fit works.
 ```bash
 npm install
 npx expo start          # run on a device via Expo Go
+npm run check           # the gate before a push: unit tests, then the conventions test
 npm test                # jest, via the jest-expo preset
 npm run icons           # regenerate assets/ from the head model
-npm run e2e             # build for web and drive the app in a browser
+npm run test:e2e        # build for web and drive the app in a browser
 npx expo export --platform ios --platform android --output-dir .export-check
 ```
 
 `npx expo export` is the fastest way to confirm a change still compiles for both
-platforms. `npm run e2e` is how to confirm it actually *runs*: there is no
-device in CI, so the web build stands in for one. Run both (and `npm test`)
+platforms. `npm run test:e2e` is how to confirm it actually *runs*: there is no
+device in CI, so the web build stands in for one. Run both (and `npm run check`)
 before pushing.
 
 ## Where things live
@@ -49,7 +50,7 @@ before pushing.
   on known thirds (`e2e/portrait.mjs`). It fails on any console or page error,
   which is how a runtime break gets caught when bundling still succeeds.
 
-## Conventions
+## Rules of this codebase
 
 - The geometry and solver modules stay free of React and React Native imports.
   That is what makes them testable, and CI depends on it — keep it that way.
@@ -66,3 +67,34 @@ before pushing.
 - Web is a test surface, not a shipping target, but it has to stay working
   because the smoke test rides on it. Prefer a dependency that behaves the same
   on all three platforms over one that needs a web special case.
+
+## Native configuration
+
+The Android/iOS posture is pinned by `__tests__/appConfig.test.js`, which
+introspects the real plugin chain (`expo config --type introspect`) rather than
+reading app.json alone: app.json states every key the test pins, even at its
+default, so the two say the same thing and a default that moves between SDKs
+moves visibly. `expo-system-ui` is what makes `userInterfaceStyle` reach Android
+(its pin is read from `expo/bundledNativeModules.json`, so an SDK upgrade moves
+it); `android.predictiveBackGestureEnabled: false` protects the
+BackHandler-driven screens and has no reader on SDK 53 — it is there for the SDK
+57 upgrade, which also drops `newArchEnabled` and `android.edgeToEdgeEnabled`
+from the schema, so those two assertions flip to `toBeUndefined()` then. The
+adaptive icon is three generated layers (`adaptive-icon.png`,
+`android-icon-background.png`, `android-icon-monochrome.png`) out of
+`tools/make-icons.mjs` — the monochrome layer is the foreground's geometry in
+white because a themed launcher reads only its alpha — and `npm run icons:check`
+plus the pixel checks in the config test keep them honest; never hand-draw one.
+`eas.json` uses `appVersionSource: remote` with `autoIncrement` on production,
+so build numbers live on EAS. `expo export --output-dir` must be inside the
+project (a /tmp path is refused), which is why CI writes to `.export-check`.
+
+## Conventions
+
+This repository follows `CONVENTIONS.md`, which is identical in every platteration
+repository and pinned by the conventions test (`npm run test:conventions`, or
+`tests/test_conventions.py` in a Python repository): the script set (`test`,
+`typecheck`, `lint`, `check`, `test:e2e`, `test:all`), Node 22 via `.nvmrc`, one
+`.editorconfig`, ESLint per stack, the `ci.yml` shape, the documents every repository
+carries and the README skeleton. `npm run check` is the gate before a push. To change a
+convention, change it in every repository in one pass and update the hashes in the test.

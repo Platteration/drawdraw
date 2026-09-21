@@ -92,30 +92,7 @@ Expo Go will refuse to open it. Until that upgrade lands, use a development buil
 `npx expo run:ios` or `npx expo run:android` — which is what the exports and the share
 sheet want anyway.
 
-## Development
-
-```bash
-npm test          # unit tests: head model, fit solver, storage, entitlements, screens
-npm run e2e       # build for web and drive the app in a real browser
-npm run icons     # regenerate assets/ from the head model
-```
-
-The geometry and solver are pure modules with no React Native imports, so they
-are tested directly: rotation orthonormality, finite output across the full
-sphere of orientations and every proportion preset, hidden-line splitting, the
-two signals the fit reads, and the solver's recovery, noise tolerance and
-refusal of degenerate input. CI runs the tests, bundles for both platforms, and
-checks that `assets/` still matches what the model generates.
-
-Bundling proves the app compiles; `npm run e2e` proves it runs. It builds for
-web, serves it, and drives the real critical path in Chromium — onboarding,
-importing a portrait, fitting the guide with three taps — then reads the
-rendered SVG back and checks where the guide actually landed against a
-synthetic portrait laid out on known thirds. Any console or page error fails
-the run, which is how a runtime break gets caught while bundling still
-succeeds. Web is a test surface rather than a shipping target.
-
-## Building standalone apps
+### Native builds
 
 ```bash
 npm install -g eas-cli
@@ -151,6 +128,31 @@ follow you to a new device. On iOS the documents directory is still covered by
 iCloud backup and there is no Expo API for excluding a file from it, so deleting
 a portrait (hold its thumbnail on the home screen) is what takes it out of the
 next backup.
+
+## Development
+
+```bash
+npm run check     # the gate before a push: unit tests, then the conventions test
+npm test          # unit tests: head model, fit solver, storage, entitlements, screens
+npm run test:e2e  # build for web and drive the app in a real browser
+npm run icons     # regenerate assets/ from the head model
+```
+
+The geometry and solver are pure modules with no React Native imports, so they
+are tested directly: rotation orthonormality, finite output across the full
+sphere of orientations and every proportion preset, hidden-line splitting, the
+two signals the fit reads, and the solver's recovery, noise tolerance and
+refusal of degenerate input. CI runs the tests and the conventions test, bundles
+for Android and web, checks that `assets/` still matches what the model
+generates, and then runs the browser smoke test.
+
+Bundling proves the app compiles; `npm run test:e2e` proves it runs. It builds for
+web, serves it, and drives the real critical path in Chromium — onboarding,
+importing a portrait, fitting the guide with three taps — then reads the
+rendered SVG back and checks where the guide actually landed against a
+synthetic portrait laid out on known thirds. Any console or page error fails
+the run, which is how a runtime break gets caught while bundling still
+succeeds. Web is a test surface rather than a shipping target.
 
 ## Project layout
 

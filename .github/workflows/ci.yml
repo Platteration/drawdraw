@@ -2,38 +2,42 @@ name: CI
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
   pull_request:
+  workflow_dispatch:
+
+# A newer push to the same branch supersedes an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - name: Unit tests
-        run: npx jest --ci
-      - name: Bundle for iOS and Android
-        run: npx expo export --platform ios --platform android --output-dir .export-check
-      - name: Icons still match the model
-        run: npm run icons:check
 
-  e2e:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
+
       - run: npm ci
+
+      - run: npm test
+
+      - run: npm run test:conventions
+
+      # The Expo CLI refuses an output directory outside the project, so the bundle
+      # lands in .export-check (ignored) rather than /tmp.
+      - run: npx expo export --platform android --platform web --output-dir .export-check
+
+      - run: npm run icons:check
+
       - run: npx playwright install --with-deps chromium
-      - name: Smoke test the app in a browser
-        run: npm run e2e
+
+      - run: npm run test:e2e
