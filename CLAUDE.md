@@ -9,7 +9,8 @@ See README.md for what it does and how the pose fit works.
 ```bash
 npm install
 npx expo start          # run on a device via Expo Go
-npm run check           # the gate before a push: unit tests, then the conventions test
+npm run check           # the gate before a push: lint, unit tests, conventions test
+npm run lint            # eslint, the shared Expo configuration
 npm test                # jest, via the jest-expo preset
 npm run icons           # regenerate assets/ from the head model
 npm run test:e2e        # build for web and drive the app in a browser

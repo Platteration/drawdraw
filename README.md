@@ -132,7 +132,8 @@ next backup.
 ## Development
 
 ```bash
-npm run check     # the gate before a push: unit tests, then the conventions test
+npm run check     # the gate before a push: lint, unit tests, conventions test
+npm run lint      # eslint, the shared Expo configuration
 npm test          # unit tests: head model, fit solver, storage, entitlements, screens
 npm run test:e2e  # build for web and drive the app in a real browser
 npm run icons     # regenerate assets/ from the head model
@@ -142,8 +143,8 @@ The geometry and solver are pure modules with no React Native imports, so they
 are tested directly: rotation orthonormality, finite output across the full
 sphere of orientations and every proportion preset, hidden-line splitting, the
 two signals the fit reads, and the solver's recovery, noise tolerance and
-refusal of degenerate input. CI runs the tests and the conventions test, bundles
-for Android and web, checks that `assets/` still matches what the model
+refusal of degenerate input. CI lints, runs the tests and the conventions test,
+bundles for Android and web, checks that `assets/` still matches what the model
 generates, and then runs the browser smoke test.
 
 Bundling proves the app compiles; `npm run test:e2e` proves it runs. It builds for
