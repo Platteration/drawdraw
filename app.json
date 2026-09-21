@@ -14,6 +14,7 @@
     "android": {
       "package": "com.platteration.drawdraw",
       "edgeToEdgeEnabled": false,
+      "predictiveBackGestureEnabled": false,
       "allowBackup": false,
       "blockedPermissions": [
         "android.permission.INTERNET",
@@ -26,6 +27,8 @@
       ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
         "backgroundColor": "#f4efe6"
       }
     },

@@ -2,6 +2,12 @@
  * Generates the app icons and splash mark from the real head model, so the
  * app's identity and its subject can never drift apart. Run: npm run icons
  *
+ * Android's adaptive icon is three layers, and app.json names all three: the
+ * foreground, a flat background at the app's paper colour, and a monochrome
+ * layer that a themed launcher (Android 13+) tints itself, reading only its
+ * alpha — so that one is the foreground drawn in white on transparent, at the
+ * same coverage, so the themed and the plain icon line up.
+ *
  * Pass --check to verify the committed assets still match the model without
  * writing anything. It compares decoded pixels rather than file bytes, since
  * zlib's output can differ between Node versions while the image does not.
@@ -26,6 +32,7 @@ const { buildHeadWireframe, HEAD_HEIGHT_UNITS } = await import(
 
 const PAPER = [0xf4, 0xef, 0xe6];
 const SANGUINE = [0xb4, 0x54, 0x3a];
+const WHITE = [0xff, 0xff, 0xff];
 
 // --- raster ---------------------------------------------------------------
 
@@ -105,7 +112,7 @@ function strokePolyline(mask, size, points, closed, width) {
  * canvas height the head occupies — Android's adaptive icon crops to a circle,
  * so its foreground needs a smaller head than the plain iOS icon.
  */
-function drawHead(canvas, { coverage, weight, elements }) {
+function drawHead(canvas, { coverage, weight, elements, color = SANGUINE }) {
   const { size } = canvas;
   const wire = buildHeadWireframe(VIEW.yaw, VIEW.pitch, 0, { elements, proportions: PROPORTIONS });
   const ppu = (size * coverage) / HEAD_HEIGHT_UNITS;
@@ -120,14 +127,14 @@ function drawHead(canvas, { coverage, weight, elements }) {
   for (const poly of wire.back) {
     strokePolyline(hidden, size, project(poly.points), poly.closed, width * 0.8);
   }
-  compositeMask(canvas, hidden, SANGUINE, 0.24);
+  compositeMask(canvas, hidden, color, 0.24);
 
   const visible = new Float32Array(size * size);
   strokePolyline(visible, size, project(wire.outline.points), true, width);
   for (const poly of wire.front) {
     strokePolyline(visible, size, project(poly.points), poly.closed, width);
   }
-  compositeMask(canvas, visible, SANGUINE, 1);
+  compositeMask(canvas, visible, color, 1);
 }
 
 // The mark is the method: a head cut into three. A centre line crossing the
@@ -141,6 +148,17 @@ const PROPORTIONS = { width: 0.9, depth: 0.98, noseY: -0.5, browY: 0.5 };
 const OUTPUTS = [
   { file: 'icon.png', size: 1024, background: PAPER, coverage: 0.72, weight: 0.022 },
   { file: 'adaptive-icon.png', size: 1024, background: null, coverage: 0.5, weight: 0.019 },
+  // The other two adaptive layers. The background carries no head at all; the
+  // monochrome layer is the foreground's geometry exactly, only white.
+  { file: 'android-icon-background.png', size: 1024, background: PAPER, head: false },
+  {
+    file: 'android-icon-monochrome.png',
+    size: 1024,
+    background: null,
+    coverage: 0.5,
+    weight: 0.019,
+    color: WHITE,
+  },
   { file: 'splash-icon.png', size: 1024, background: null, coverage: 0.66, weight: 0.016 },
   { file: 'favicon.png', size: 96, background: PAPER, coverage: 0.72, weight: 0.03 },
 ];
@@ -150,7 +168,14 @@ let stale = 0;
 
 for (const output of OUTPUTS) {
   const canvas = createCanvas(output.size, output.background);
-  drawHead(canvas, { coverage: output.coverage, weight: output.weight, elements: ELEMENTS });
+  if (output.head !== false) {
+    drawHead(canvas, {
+      coverage: output.coverage,
+      weight: output.weight,
+      elements: ELEMENTS,
+      color: output.color,
+    });
+  }
   const path = join(root, 'assets', output.file);
 
   if (check) {
