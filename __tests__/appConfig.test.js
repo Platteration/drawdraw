@@ -229,10 +229,22 @@ describe('what leaves the device', () => {
     // a URL to something that does. Adding one means the shipped build needs
     // the permission back, and the privacy argument above is over.
     expect(appSource()).not.toMatch(
-      /\bfetch\s*\(|XMLHttpRequest|WebSocket|\baxios\b|openURL|openBrowserAsync|expo-updates/
+      /\bfetch\s*\(|XMLHttpRequest|WebSocket|\baxios\b|openBrowserAsync|expo-updates/
     );
-    // ...and with no URL handled anywhere, no scheme is registered either: a
-    // scheme is an entry point other apps can open.
+    // The one URL the app hands out is the About row's source link, which
+    // `Linking.openURL` passes to the operating system: the browser fetches
+    // it in its own process under its own permissions, and this app still
+    // opens no socket — the manifest test above holds either way. Pinned to
+    // that single call and that single https URL, so a second use is a
+    // decision rather than a drift.
+    expect(appSource().match(/\bLinking\.\w+\([^)]*\)/g)).toEqual(['Linking.openURL(SOURCE_URL)']);
+    const settingsScreen = fs.readFileSync(path.join(root, 'src/screens/SettingsScreen.js'), 'utf8');
+    expect(/export const SOURCE_URL = '([^']+)'/.exec(settingsScreen)[1]).toBe(
+      'https://github.com/Platteration/drawdraw'
+    );
+    // ...and with no URL handled anywhere (the link goes out, none come in),
+    // no scheme is registered either: a scheme is an entry point other apps
+    // can open.
     expect(appConfig.scheme).toBeUndefined();
   });
 

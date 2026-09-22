@@ -12,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
+import { confirmAction } from '../lib/confirm';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
 import { createProject, deleteProject, listProjects } from '../lib/storage';
 
@@ -47,7 +48,13 @@ function HeadMark({ size = 118 }) {
   );
 }
 
-export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = () => {}, onReplayIntro = () => {} }) {
+export default function HomeScreen({
+  onOpenProject,
+  pro = false,
+  onRequestPro = () => {},
+  onReplayIntro = () => {},
+  onOpenSettings = () => {},
+}) {
   const [busy, setBusy] = useState(false);
   const [recents, setRecents] = useState([]);
 
@@ -107,18 +114,20 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
     }
   };
 
+  // Through the helper rather than Alert.alert directly: react-native-web's
+  // Alert is an empty stub, so a confirm made there showed nothing and the
+  // long-press did nothing at all on the web build.
   const confirmDelete = (project) => {
-    Alert.alert('Remove drawing?', 'This removes the saved portrait and its guide setup.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          await deleteProject(project.id);
-          refresh();
-        },
+    confirmAction({
+      title: 'Remove drawing?',
+      message: 'This removes the saved portrait and its guide setup.',
+      cancelLabel: 'Cancel',
+      confirmLabel: 'Remove',
+      onConfirm: async () => {
+        await deleteProject(project.id);
+        refresh();
       },
-    ]);
+    });
   };
 
   return (
@@ -133,10 +142,20 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
       </View>
 
       <View style={styles.buttons}>
-        <Pressable style={[styles.button, styles.primary]} onPress={pickFromLibrary} disabled={busy}>
+        <Pressable
+          style={[styles.button, styles.primary]}
+          onPress={pickFromLibrary}
+          disabled={busy}
+          accessibilityRole="button"
+        >
           <Text style={styles.buttonText}>Choose a portrait</Text>
         </Pressable>
-        <Pressable style={[styles.button, styles.secondary]} onPress={takePhoto} disabled={busy}>
+        <Pressable
+          style={[styles.button, styles.secondary]}
+          onPress={takePhoto}
+          disabled={busy}
+          accessibilityRole="button"
+        >
           <Text style={[styles.buttonText, styles.secondaryText]}>Take a photo</Text>
         </Pressable>
       </View>
@@ -151,6 +170,8 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
                 onPress={() => onOpenProject(project)}
                 onLongPress={() => confirmDelete(project)}
                 style={styles.thumb}
+                accessibilityRole="button"
+                accessibilityLabel="Recent portrait. Tap to reopen, hold to remove"
               >
                 <Image source={{ uri: project.image.uri }} style={styles.thumbImage} />
               </Pressable>
@@ -161,13 +182,17 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
       )}
 
       <View style={styles.footer}>
-        <Pressable onPress={onReplayIntro} hitSlop={8}>
+        <Pressable onPress={onReplayIntro} hitSlop={8} accessibilityRole="button">
           <Text style={styles.footerLink}>How it works</Text>
+        </Pressable>
+        <Text style={styles.footerDot}>·</Text>
+        <Pressable onPress={onOpenSettings} hitSlop={8} accessibilityRole="button">
+          <Text style={styles.footerLink}>Settings</Text>
         </Pressable>
         {!pro && (
           <>
             <Text style={styles.footerDot}>·</Text>
-            <Pressable onPress={onRequestPro} hitSlop={8}>
+            <Pressable onPress={onRequestPro} hitSlop={8} accessibilityRole="button">
               <Text style={[styles.footerLink, styles.footerLinkAccent]}>Unlock Pro</Text>
             </Pressable>
           </>

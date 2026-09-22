@@ -6,7 +6,10 @@ import HomeScreen from './src/screens/HomeScreen';
 import EditorScreen from './src/screens/EditorScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import PaywallScreen from './src/screens/PaywallScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
+import { setHapticsEnabled } from './src/lib/feedback';
 import { useEntitlements } from './src/lib/pro';
+import { resetSettings } from './src/lib/settings';
 import { loadSettings, persistSettings } from './src/lib/settingsStore';
 import { colors } from './src/theme';
 
@@ -16,6 +19,7 @@ export default function App() {
   const [settings, setSettings] = useState(null); // null while loading
   const [replayingIntro, setReplayingIntro] = useState(false);
   const [paywall, setPaywall] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const { pro, ready: entitlementsRead, purchase, restore } = useEntitlements();
 
   // Nothing is rendered until both the settings (which carry the onboarding
@@ -34,6 +38,12 @@ export default function App() {
       return next;
     });
   }, []);
+
+  // The Vibration switch gates every haptic through one module flag; nothing
+  // else in the app reads the setting.
+  useEffect(() => {
+    if (settings) setHapticsEnabled(settings.haptics);
+  }, [settings]);
 
   // Replaying the intro from the home screen is a thing this session does,
   // not a change to what has been seen: closing the app mid-replay does not
@@ -66,7 +76,23 @@ export default function App() {
           pro={pro}
           onRequestPro={() => setPaywall(true)}
           onReplayIntro={() => setReplayingIntro(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
+      )}
+
+      {settings && (
+        <Modal
+          visible={settingsOpen}
+          animationType="slide"
+          onRequestClose={() => setSettingsOpen(false)}
+        >
+          <SettingsScreen
+            settings={settings}
+            onChange={updateSettings}
+            onReset={() => updateSettings(resetSettings(settings))}
+            onClose={() => setSettingsOpen(false)}
+          />
+        </Modal>
       )}
 
       <Modal visible={paywall} animationType="slide" onRequestClose={() => setPaywall(false)}>

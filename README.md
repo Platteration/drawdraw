@@ -168,11 +168,16 @@ src/lib/fitSolver.js            Three-tap pose solver (Procrustes + search)
 src/lib/storage.js              Projects: durable image copies + settings
 src/lib/pro.js                  Entitlements and what each tier includes
 src/lib/purchases.js            Store provider seam
+src/lib/settings.js             Storage keys, the settings record and its validator
+src/lib/settingsStore.js        Reads and writes it; migrates the old onboarding flag
+src/lib/feedback.js             Every haptic, behind the Vibration switch
+src/lib/confirm.js              Confirmations that also work on react-native-web
 
 src/screens/HomeScreen.js       Pick a portrait, reopen recents
 src/screens/EditorScreen.js     The overlay editor and exports
 src/screens/OnboardingScreen.js Three pages teaching the method
 src/screens/PaywallScreen.js    One-time unlock
+src/screens/SettingsScreen.js   Vibration, reset to defaults, about
 
 src/components/HeadGuide.js         SVG rendering of the head (screen + export)
 src/components/HeadGestureLayer.js  Rotate / move / pinch / twist, snap haptics

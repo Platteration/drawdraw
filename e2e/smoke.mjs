@@ -204,6 +204,26 @@ try {
   const paywall = await page.locator('body').innerText();
   check('a locked control opens the paywall', paywall.includes('Unlock Pro'));
 
+  // Settings, and the confirmation behind Reset. react-native-web's Alert is an
+  // empty stub, so a confirm made through it shows nothing here: the browser
+  // dialog is the only kind this build can raise, and the handler below is
+  // what proves one was.
+  const dialogs = [];
+  page.on('dialog', async (dialog) => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  });
+  await tap('Close');
+  await tap('‹ Portraits');
+  await tap('Settings');
+  const settings = await page.locator('body').innerText();
+  check('settings shows its rows', settings.includes('Vibration') && settings.includes('Reset to defaults'));
+  const version = JSON.parse(readFileSync(join(root, 'app.json'), 'utf8')).expo.version;
+  check('about carries the version from app.json', settings.includes(`DrawDraw ${version}`), `wanted ${version}`);
+  check('about says what stays on the device', settings.includes('Nothing leaves your device'));
+  await tap('Reset to defaults');
+  check('reset asks first, through the browser dialog', dialogs.length === 1 && dialogs[0].startsWith('Reset settings?'), dialogs.join(' | ') || 'no dialog');
+
   check('no console or page errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 } finally {
   await browser.close();

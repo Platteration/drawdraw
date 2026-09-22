@@ -90,6 +90,33 @@ plus the pixel checks in the config test keep them honest; never hand-draw one.
 so build numbers live on EAS. `expo export --output-dir` must be inside the
 project (a /tmp path is refused), which is why CI writes to `.export-check`.
 
+## Settings
+
+User preferences are one record under `drawdraw.settings.v1`, beside the project index
+(`drawdraw.projects.v1`) and the Pro flag (`drawdraw.entitlements.v1`); every key is named
+in `KEYS` in `src/lib/settings.js`, and `__tests__/settings-contract.test.js` pins the key
+list, the rows (`haptics`, `seenIntro`) and the enum tables (none yet: both fields are
+booleans, and the first enum row adds its table to `TABLES`). `settings.js` is the
+validator — pure, like `projectShape.js` — and every read goes through `cleanSettings` /
+`cleanEntitlements`, which rebuild a record field by field from the defaults and look tables
+up by own property only (`has`); its test walks `Object.prototype`'s names built with
+`JSON.parse`, and must fail if `has` becomes `in`. `src/lib/settingsStore.js` is the only
+module that reads or writes the record, and holds the one migration: the old
+`drawdraw.onboarded.v1` flag is folded into `seenIntro` (read NEW; else read OLD, write NEW,
+remove OLD only after the write succeeded; both present means NEW wins). `App.js` loads the
+record before the first frame, gates every haptic through `setHapticsEnabled` in
+`src/lib/feedback.js` (no call site touches `expo-haptics` directly), and shows
+`SettingsScreen` in a Modal from the home screen's footer. Reset to defaults is confirmed and
+touches the settings record alone — never projects, Pro or `seenIntro`, which records what
+was shown rather than a preference. Confirmations go through `src/lib/confirm.js`, because
+react-native-web's `Alert.alert` is an empty stub and a two-button confirm through it did
+nothing on the web build the e2e drives. There is no theme row: the app has one palette, and
+`__tests__/appearance.test.js` pins `userInterfaceStyle: light` to that. About shows the
+version from `expo-constants` (`Constants.expoConfig.version`, app.json's `version`; not yet
+checked on an EAS build, where `appVersionSource: remote` may need `expo-application` as the
+fallback) and the source link — the one URL the app hands to the OS, which
+`appConfig.test.js` pins to that single `Linking.openURL` call.
+
 ## Conventions
 
 This repository follows `CONVENTIONS.md`, which is identical in every platteration

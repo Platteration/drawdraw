@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 jest.mock('expo-image-picker', () => ({
   requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ granted: false })),
@@ -21,7 +21,7 @@ jest.mock('../../lib/storage', () => ({
 }));
 
 import * as ImagePicker from 'expo-image-picker';
-import { createProject } from '../../lib/storage';
+import { createProject, deleteProject, listProjects } from '../../lib/storage';
 import HomeScreen from '../HomeScreen';
 
 async function mount() {
@@ -42,12 +42,21 @@ async function mount() {
   return { tree, onOpenProject, pressByLabel };
 }
 
+const realOS = Platform.OS;
+const hadWindow = typeof global.window !== 'undefined';
+const realConfirm = hadWindow ? global.window.confirm : undefined;
+
 beforeEach(() => {
   jest.clearAllMocks();
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
 });
 
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => {
+  jest.restoreAllMocks();
+  Platform.OS = realOS;
+  if (hadWindow) global.window.confirm = realConfirm;
+  else delete global.window;
+});
 
 describe('choosing a portrait', () => {
   it('opens the picker without asking for library access', async () => {
@@ -70,6 +79,64 @@ describe('choosing a portrait', () => {
     expect(ImagePicker.requestCameraPermissionsAsync).toHaveBeenCalledTimes(1);
     expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalled();
+  });
+});
+
+describe('removing a recent portrait', () => {
+  const RECENT = {
+    id: 'p9',
+    updatedAt: 1,
+    image: { uri: 'file:///docs/portraits/p9.jpg', width: 10, height: 20 },
+    settings: null,
+  };
+
+  /** Mount with one recent and hand back its long-press. */
+  async function mountWithRecent() {
+    listProjects.mockResolvedValueOnce([RECENT]);
+    const { tree } = await mount();
+    const thumb = tree.root.findAll((n) => n.props && typeof n.props.onLongPress === 'function')[0];
+    expect(thumb).toBeDefined();
+    return () => act(async () => thumb.props.onLongPress());
+  }
+
+  it('asks through the browser dialog on the web, where Alert.alert is an empty stub', async () => {
+    // react-native-web's Alert is `class Alert { static alert() {} }`: the
+    // confirm used to go through it, so on the web build a long-press showed
+    // nothing and removed nothing, with no error to notice.
+    Platform.OS = 'web';
+    if (!hadWindow) global.window = {};
+    global.window.confirm = jest.fn(() => true);
+
+    const longPress = await mountWithRecent();
+    await longPress();
+
+    expect(global.window.confirm).toHaveBeenCalledTimes(1);
+    expect(deleteProject).toHaveBeenCalledWith('p9');
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('removes nothing when the dialog is cancelled', async () => {
+    Platform.OS = 'web';
+    if (!hadWindow) global.window = {};
+    global.window.confirm = jest.fn(() => false);
+
+    const longPress = await mountWithRecent();
+    await longPress();
+
+    expect(deleteProject).not.toHaveBeenCalled();
+  });
+
+  it('asks through a two-button alert on a device, and removes only on Remove', async () => {
+    Platform.OS = 'ios';
+    const longPress = await mountWithRecent();
+    await longPress();
+
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    const buttons = Alert.alert.mock.calls[0][2];
+    expect(buttons.map((b) => b.text)).toEqual(['Cancel', 'Remove']);
+    expect(deleteProject).not.toHaveBeenCalled();
+    await act(async () => buttons[1].onPress());
+    expect(deleteProject).toHaveBeenCalledWith('p9');
   });
 });
 

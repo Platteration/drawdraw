@@ -15,7 +15,6 @@ import {
 import { captureRef, releaseCapture } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 import * as Sharing from 'expo-sharing';
-import * as Haptics from 'expo-haptics';
 
 import GuideOverlay from '../components/GuideOverlay';
 import DraggableGuide from '../components/DraggableGuide';
@@ -39,6 +38,7 @@ import {
   PROPORTION_RANGES,
 } from '../lib/headModel';
 import { captureSize } from '../lib/exportSize';
+import { haptics } from '../lib/feedback';
 import { saveSettings } from '../lib/storage';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 
@@ -259,7 +259,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     const taps = [...fitTaps, point];
     if (taps.length < FIT_STEPS.length) {
       setFitTaps(taps);
-      Haptics.selectionAsync().catch(() => {});
+      haptics.tap();
       return;
     }
     const solved = solveHeadFromTaps(taps, { width: displayW, height: displayH }, proportions);
@@ -267,7 +267,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     setMode('rotate');
     if (solved) {
       setHeadTransform(solved);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+      haptics.fitted();
     } else {
       Alert.alert(
         'Could not fit',

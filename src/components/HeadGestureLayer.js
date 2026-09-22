@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { PanResponder, StyleSheet, View } from 'react-native';
-import * as Haptics from 'expo-haptics';
 
+import { haptics } from '../lib/feedback';
 import { HEAD_OFFSET_RANGE } from '../lib/headModel';
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -30,7 +30,7 @@ function snapYaw(yaw, lastSnap) {
   if (Math.abs(yaw - nearest) <= SNAP_WINDOW) {
     if (lastSnap.current !== nearest) {
       lastSnap.current = nearest;
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      haptics.snap();
     }
     return nearest;
   }
