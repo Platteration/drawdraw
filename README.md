@@ -144,7 +144,7 @@ are tested directly: rotation orthonormality, finite output across the full
 sphere of orientations and every proportion preset, hidden-line splitting, the
 two signals the fit reads, and the solver's recovery, noise tolerance and
 refusal of degenerate input. CI lints, runs the tests and the conventions test,
-bundles for Android and web, checks that `assets/` still matches what the model
+bundles for iOS and Android, checks that `assets/` still matches what the model
 generates, and then runs the browser smoke test.
 
 Bundling proves the app compiles; `npm run test:e2e` proves it runs. It builds for

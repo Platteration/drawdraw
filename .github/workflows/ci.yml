@@ -36,7 +36,7 @@ jobs:
 
       # The Expo CLI refuses an output directory outside the project, so the bundle
       # lands in .export-check (ignored) rather than /tmp.
-      - run: npx expo export --platform android --platform web --output-dir .export-check
+      - run: npx expo export --platform ios --platform android --output-dir .export-check
 
       - run: npm run icons:check
 
