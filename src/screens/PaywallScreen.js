@@ -89,7 +89,7 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={onClose} hitSlop={12}>
+        <Pressable onPress={onClose} hitSlop={12} accessibilityRole="button">
           <Text style={styles.close}>Close</Text>
         </Pressable>
       </View>
@@ -131,10 +131,18 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
           style={[styles.buy, busy && styles.buyDisabled]}
           disabled={busy}
           onPress={() => run(() => onPurchase(listing.id), 'Purchase')}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
         >
           <Text style={styles.buyText}>{product ? `Unlock Pro · ${product.price}` : 'Unlock Pro'}</Text>
         </Pressable>
-        <Pressable onPress={() => run(onRestore, 'Restore')} disabled={busy} hitSlop={10}>
+        <Pressable
+          onPress={() => run(onRestore, 'Restore')}
+          disabled={busy}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+        >
           <Text style={styles.restore}>Restore purchase</Text>
         </Pressable>
       </View>

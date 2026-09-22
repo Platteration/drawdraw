@@ -22,12 +22,17 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(async () => {}),
   removeItem: jest.fn(async () => {}),
 }));
+jest.mock('../src/lib/feedback', () => ({
+  setHapticsEnabled: jest.fn(),
+  haptics: { tap: jest.fn(), snap: jest.fn(), fitted: jest.fn() },
+}));
 
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import App from '../App';
+import { setHapticsEnabled } from '../src/lib/feedback';
 import HomeScreen from '../src/screens/HomeScreen';
 import OnboardingScreen from '../src/screens/OnboardingScreen';
 
@@ -105,6 +110,40 @@ it('honours the onboarding flag the previous build wrote, and moves it', async (
   expect(tree.root.findAllByType(HomeScreen)).toHaveLength(1);
   expect(AsyncStorage.setItem).toHaveBeenCalledWith(SETTINGS_KEY, SEEN);
   expect(AsyncStorage.removeItem).toHaveBeenCalledWith(ONBOARDED_KEY);
+});
+
+it('writes the dismissal of the intro to the settings record', async () => {
+  // A new user: no settings record and no old flag. Skipping the intro has to
+  // reach storage, or it is back on every launch and nothing in the suite
+  // says so — the migration promises the opposite for the old flag.
+  mockReads.set(SETTINGS_KEY, Promise.resolve(null));
+  mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
+
+  await act(async () => {
+    tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
+  });
+  const intro = tree.root.findByType(OnboardingScreen);
+  await act(async () => intro.props.onDone());
+
+  expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(0);
+  expect(tree.root.findAllByType(HomeScreen)).toHaveLength(1);
+  expect(AsyncStorage.setItem).toHaveBeenCalledWith(
+    SETTINGS_KEY,
+    JSON.stringify({ haptics: true, seenIntro: true })
+  );
+});
+
+it('hands the stored Vibration setting to the haptics gate', async () => {
+  // The gate (feedback.js) and the switch (SettingsScreen) are each tested on
+  // their own; this is the one line that connects them.
+  mockReads.set(SETTINGS_KEY, Promise.resolve(JSON.stringify({ haptics: false, seenIntro: true })));
+  mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
+
+  await act(async () => {
+    tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
+  });
+
+  expect(setHapticsEnabled).toHaveBeenLastCalledWith(false);
 });
 
 it('renders the free build for someone who has not bought it', async () => {

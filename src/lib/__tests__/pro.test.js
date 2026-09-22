@@ -101,6 +101,35 @@ describe('purchase', () => {
   });
 });
 
+describe('the stored record', () => {
+  it('grants Pro on a stored true and on nothing that merely looks like one', async () => {
+    // The read site, not only the validator: a stored record is plain
+    // localStorage on the web build, and a truthiness check here would take
+    // any of these as a purchase.
+    for (const raw of ['{"pro":1}', '{"pro":"true"}', '{"pro":"constructor"}', '{"__proto__":{"pro":true}}', '"pro"']) {
+      AsyncStorage.getItem.mockResolvedValue(raw);
+      await mount();
+      expect(entitlements.ready).toBe(true);
+      expect(entitlements.pro).toBe(false);
+    }
+    AsyncStorage.getItem.mockResolvedValue('{"pro":true}');
+    await mount();
+    expect(entitlements.pro).toBe(true);
+  });
+
+  it('writes back the flag alone, not whatever the stored record carried', async () => {
+    // `grant` spreads the record it read; read raw, a stored extra field would
+    // be persisted for good on the first purchase.
+    AsyncStorage.getItem.mockResolvedValue('{"pro":false,"receipt":"x","__proto__":{"y":1}}');
+    purchases.purchase.mockResolvedValue({ pro: true });
+    await mount();
+    await act(async () => {
+      await entitlements.purchase('com.platteration.drawdraw.pro');
+    });
+    expect(AsyncStorage.setItem).toHaveBeenCalledWith('drawdraw.entitlements.v1', JSON.stringify({ pro: true }));
+  });
+});
+
 describe('ready', () => {
   it('stays false until the stored entitlement has actually been read', async () => {
     // `pro` starts false, so a caller that renders before this is true shows

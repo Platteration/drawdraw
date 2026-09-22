@@ -125,12 +125,12 @@ export default function OnboardingScreen({ onDone }) {
             <View key={p.title} style={[styles.dot, i === page && styles.dotActive]} />
           ))}
         </View>
-        <Pressable style={styles.next} onPress={() => goTo(page + 1)}>
+        <Pressable style={styles.next} onPress={() => goTo(page + 1)} accessibilityRole="button">
           <Text style={styles.nextText}>
             {page === PAGES.length - 1 ? 'Start drawing' : 'Next'}
           </Text>
         </Pressable>
-        <Pressable onPress={onDone} hitSlop={10}>
+        <Pressable onPress={onDone} hitSlop={10} accessibilityRole="button">
           <Text style={styles.skip}>Skip</Text>
         </Pressable>
       </View>

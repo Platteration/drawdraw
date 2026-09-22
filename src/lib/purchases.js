@@ -54,9 +54,11 @@ class NotConfiguredProvider {
   }
 
   async getProducts() {
-    // The public web build ships this provider, and a button reading "$7.99"
-    // that takes no payment misrepresents what the tap does. `purchase`
-    // below refuses, so the label says so rather than calling it free.
+    // Every build runs this provider until setPurchaseProvider names a real
+    // one — the web build the e2e drives included — and a button reading
+    // "$7.99" that takes no payment misrepresents what the tap does.
+    // `purchase` below refuses, so the label says so rather than calling it
+    // free.
     return Object.values(PRODUCTS).map((p) => ({ ...p, price: NOT_CONFIGURED_PRICE }));
   }
 

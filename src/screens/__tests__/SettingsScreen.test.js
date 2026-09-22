@@ -75,7 +75,7 @@ it('asks before resetting, and resets only when told to', async () => {
 it('hands the source link, and only that, to the operating system', async () => {
   jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
   await mount(props());
-  await pressByText('MIT licence · Source on GitHub');
+  await pressByText('MIT licence · source');
   expect(Linking.openURL).toHaveBeenCalledTimes(1);
   expect(Linking.openURL).toHaveBeenCalledWith(SOURCE_URL);
   expect(SOURCE_URL).toBe('https://github.com/Platteration/drawdraw');

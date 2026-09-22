@@ -130,6 +130,12 @@ try {
   const home = await page.locator('body').innerText();
   check('home screen offers a portrait', home.includes('Choose a portrait'));
 
+  // The dismissal has to be written, or the intro is back on every launch.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(1200);
+  const again = await page.locator('body').innerText();
+  check('the dismissed intro stays dismissed across a reload', !again.includes('Three segments') && again.includes('Choose a portrait'));
+
   const portraitPath = join(mkdtempSync(join(tmpdir(), 'drawdraw-')), 'portrait.png');
   writePortrait(portraitPath);
   const chooser = page.waitForEvent('filechooser');

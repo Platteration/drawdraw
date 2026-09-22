@@ -399,11 +399,21 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={onClose} hitSlop={12}>
+        <Pressable
+          onPress={onClose}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Back to portraits"
+        >
           <Text style={styles.headerAction}>‹ Portraits</Text>
         </Pressable>
         <Text style={type.title}>Three-segment head</Text>
-        <Pressable onPress={resetAll} hitSlop={12}>
+        <Pressable
+          onPress={resetAll}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Reset the guide"
+        >
           <Text style={styles.headerAction}>Reset</Text>
         </Pressable>
       </View>
@@ -521,6 +531,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                   onPressIn={() => setPeeking(true)}
                   onPressOut={() => setPeeking(false)}
                   style={[styles.peek, peeking && styles.peekActive]}
+                  accessibilityRole="button"
                 >
                   <Text style={[styles.peekText, peeking && styles.peekTextActive]}>
                     Hold to peek
@@ -637,6 +648,9 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                 <Pressable
                   key={c.value}
                   onPress={() => setGuideColor(c.value)}
+                  accessibilityRole="button"
+                  accessibilityLabel={c.name}
+                  accessibilityState={{ selected: c.value === guideColor }}
                   style={[
                     styles.swatch,
                     { backgroundColor: c.value },

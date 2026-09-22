@@ -81,16 +81,13 @@ export default function SettingsScreen({ settings, onChange, onReset, onClose })
             A three-dimensional construction head laid over your portrait, so you can draw it in
             proportion from any angle.
           </Text>
-          <Text style={styles.rowHint}>
-            Nothing leaves your device. The app has no network access, and a portrait stays in its
-            own storage until you export or remove it.
-          </Text>
+          <Text style={styles.rowHint}>Nothing leaves your device: the app has no network access.</Text>
           <Pressable
             onPress={() => Linking.openURL(SOURCE_URL).catch(() => {})}
             hitSlop={6}
             accessibilityRole="link"
           >
-            <Text style={styles.link}>MIT licence · Source on GitHub</Text>
+            <Text style={styles.link}>MIT licence · source</Text>
           </Pressable>
         </View>
       </ScrollView>

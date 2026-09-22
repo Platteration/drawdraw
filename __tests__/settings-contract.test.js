@@ -78,10 +78,56 @@ describe('the settings screen', () => {
     ]);
     // About: name and version, one sentence, the licence and source, and a privacy line that is true.
     expect(texts).toContain('DrawDraw 9.8.7');
-    expect(texts).toContain('MIT licence · Source on GitHub');
-    expect(texts.some((t) => t.startsWith('Nothing leaves your device.'))).toBe(true);
+    expect(texts).toContain('MIT licence · source');
+    expect(texts).toContain('Nothing leaves your device: the app has no network access.');
     // No theme row: see appearance.test.js.
     expect(texts.some((t) => /theme|appearance|dark/i.test(t))).toBe(false);
     await act(async () => tree.unmount());
+  });
+});
+
+describe('the accessibility floor', () => {
+  /**
+   * Every `<Pressable …>` opening tag in a source file, props included. A
+   * prop's expression can hold `=>`, so the tag ends at the first `>` outside
+   * any braces, not at the first `>`.
+   */
+  function pressableTags(source) {
+    const tags = [];
+    for (let at = source.indexOf('<Pressable'); at !== -1; at = source.indexOf('<Pressable', at + 1)) {
+      let depth = 0;
+      let i = at + '<Pressable'.length;
+      for (; i < source.length; i++) {
+        const c = source[i];
+        if (c === '{') depth++;
+        else if (c === '}') depth--;
+        else if (c === '>' && depth === 0) break;
+      }
+      tags.push(source.slice(at, i + 1));
+    }
+    return tags;
+  }
+
+  it('gives every Pressable in the app a role', () => {
+    // A screen reader announces a Pressable without one as plain text. The
+    // shared components carry theirs; this is what holds the screens to it.
+    const missing = [];
+    let seen = 0;
+    const walk = (dir) => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name !== '__tests__') walk(full);
+        } else if (entry.name.endsWith('.js')) {
+          for (const tag of pressableTags(fs.readFileSync(full, 'utf8'))) {
+            seen++;
+            if (!/\baccessibilityRole=/.test(tag)) missing.push(`${path.relative(root, full)}: ${tag.split('\n')[0]}`);
+          }
+        }
+      }
+    };
+    walk(path.join(root, 'src'));
+    expect(seen).toBeGreaterThan(15); // the scan found them
+    expect(missing).toEqual([]);
   });
 });

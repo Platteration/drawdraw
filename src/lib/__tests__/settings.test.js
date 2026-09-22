@@ -186,6 +186,41 @@ describe('the onboarded flag migration', () => {
     expect(AsyncStorage.__store.has(OLD)).toBe(false);
   });
 
+  it('write fails: honours a never-seen flag too, not the unreadable-storage answer', async () => {
+    // migrateOnboarded's own guard, not loadSettings' outer catch: that one
+    // answers seenIntro true for every failure, which for a '0' would skip an
+    // intro that was never dismissed.
+    AsyncStorage.__store.set(OLD, '0');
+    AsyncStorage.setItem.mockRejectedValueOnce(new Error('QuotaExceededError'));
+    expect(await loadSettings()).toEqual({ ...D, seenIntro: false });
+    expect(AsyncStorage.__store.has(NEW)).toBe(false);
+    expect(AsyncStorage.__store.get(OLD)).toBe('0');
+  });
+
+  it('old only, remove fails after the write: the record stands and the flag is honoured', async () => {
+    // The write succeeded, so NEW is the record from here on; a remove that
+    // fails is retried by the next launch's cleanup, and must not cost this
+    // one the flag it just folded.
+    AsyncStorage.__store.set(OLD, '0');
+    AsyncStorage.removeItem.mockRejectedValueOnce(new Error('busy'));
+    expect(await loadSettings()).toEqual({ ...D, seenIntro: false });
+    expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ seenIntro: false }));
+    expect(AsyncStorage.__store.get(OLD)).toBe('0');
+
+    expect(await loadSettings()).toEqual({ ...D, seenIntro: false });
+    expect(AsyncStorage.__store.has(OLD)).toBe(false);
+  });
+
+  it("both present, remove fails: the user's own record, not the defaults", async () => {
+    // dropLegacy's guard: a cleanup that cannot remove the old key is not a
+    // reason to read the record as the defaults for this session.
+    AsyncStorage.__store.set(NEW, JSON.stringify({ haptics: false, seenIntro: false }));
+    AsyncStorage.__store.set(OLD, '1');
+    AsyncStorage.removeItem.mockRejectedValueOnce(new Error('busy'));
+    expect(await loadSettings()).toEqual({ haptics: false, seenIntro: false });
+    expect(AsyncStorage.__store.get(OLD)).toBe('1');
+  });
+
   it('run twice: the second run finds the new record and changes nothing', async () => {
     AsyncStorage.__store.set(OLD, '1');
     const first = await loadSettings();
@@ -227,5 +262,11 @@ describe('persistSettings', () => {
     AsyncStorage.__store.clear();
     await persistSettings({ haptics: false, seenIntro: true });
     expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ haptics: false, seenIntro: true }));
+  });
+
+  it('round-trips through loadSettings', async () => {
+    AsyncStorage.__store.clear();
+    await persistSettings({ haptics: false, seenIntro: true });
+    expect(await loadSettings()).toEqual({ haptics: false, seenIntro: true });
   });
 });
