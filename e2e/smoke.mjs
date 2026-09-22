@@ -203,6 +203,11 @@ try {
   await tap('Jaw'); // a Pro-gated construction line
   const paywall = await page.locator('body').innerText();
   check('a locked control opens the paywall', paywall.includes('Unlock Pro'));
+  // This build's provider sells nothing, so the button carries its words and no
+  // currency amount. (The body text also holds the editor's slider values —
+  // 0.68 and the like — so "digits with two decimals" is not the test here.)
+  const buy = paywall.split('\n').find((line) => line.startsWith('Unlock Pro'));
+  check('the paywall prices nothing it cannot sell', buy === 'Unlock Pro · not available in this build' && !/[$£€¥]\s?\d/.test(paywall), buy || 'no button');
 
   // Settings, and the confirmation behind Reset. react-native-web's Alert is an
   // empty stub, so a confirm made through it shows nothing here: the browser

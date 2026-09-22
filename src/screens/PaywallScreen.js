@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
 import { FREE_FEATURES, PRO_FEATURES } from '../lib/pro';
-import { PRODUCTS } from '../lib/purchases';
+import { PRODUCTS, purchases } from '../lib/purchases';
 
 const ALL_ELEMENTS = {
   center: true,
@@ -51,7 +51,24 @@ function FullHead({ size = 150 }) {
 
 export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
   const [busy, setBusy] = useState(false);
-  const product = PRODUCTS.pro;
+  // The listing is the app's own copy; the product is the provider's, and its
+  // price is the only one shown. Reading PRODUCTS.pro.price here put "$7.99"
+  // on the public web build, whose provider cannot sell anything.
+  const listing = PRODUCTS.pro;
+  const [product, setProduct] = useState(null);
+
+  useEffect(() => {
+    let live = true;
+    purchases
+      .getProducts()
+      .then((list) => {
+        if (live) setProduct(list.find((p) => p.id === listing.id) ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [listing.id]);
 
   const run = async (action, label) => {
     if (busy) return;
@@ -81,8 +98,8 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
         <View style={styles.art}>
           <FullHead />
         </View>
-        <Text style={styles.title}>{product.title}</Text>
-        <Text style={styles.blurb}>{product.blurb}</Text>
+        <Text style={styles.title}>{product?.title ?? listing.title}</Text>
+        <Text style={styles.blurb}>{product?.blurb ?? listing.blurb}</Text>
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Pro adds</Text>
@@ -113,9 +130,9 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
         <Pressable
           style={[styles.buy, busy && styles.buyDisabled]}
           disabled={busy}
-          onPress={() => run(() => onPurchase(product.id), 'Purchase')}
+          onPress={() => run(() => onPurchase(listing.id), 'Purchase')}
         >
-          <Text style={styles.buyText}>{`Unlock Pro · ${product.price}`}</Text>
+          <Text style={styles.buyText}>{product ? `Unlock Pro · ${product.price}` : 'Unlock Pro'}</Text>
         </Pressable>
         <Pressable onPress={() => run(onRestore, 'Restore')} disabled={busy} hitSlop={10}>
           <Text style={styles.restore}>Restore purchase</Text>

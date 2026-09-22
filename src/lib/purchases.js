@@ -29,6 +29,12 @@
  * it recovers.
  */
 
+/**
+ * The store listing as the app intends it. `price` is what the store is asked
+ * to charge; what the paywall *shows* is whatever the provider's product
+ * says, because only a provider knows the localised price — and, until one is
+ * configured, that nothing is for sale.
+ */
 export const PRODUCTS = {
   pro: {
     id: 'com.platteration.drawdraw.pro',
@@ -39,13 +45,19 @@ export const PRODUCTS = {
   },
 };
 
+/** What the unconfigured provider says in place of a price. Not a currency amount, on purpose. */
+export const NOT_CONFIGURED_PRICE = 'not available in this build';
+
 class NotConfiguredProvider {
   get configured() {
     return false;
   }
 
   async getProducts() {
-    return Object.values(PRODUCTS);
+    // The public web build ships this provider, and a button reading "$7.99"
+    // that takes no payment misrepresents what the tap does. `purchase`
+    // below refuses, so the label says so rather than calling it free.
+    return Object.values(PRODUCTS).map((p) => ({ ...p, price: NOT_CONFIGURED_PRICE }));
   }
 
   async purchase() {
@@ -65,7 +77,10 @@ class NotConfiguredProvider {
   }
 }
 
-let provider = new NotConfiguredProvider();
+/** The provider a build runs with until `setPurchaseProvider` names a real one. */
+export const notConfiguredProvider = new NotConfiguredProvider();
+
+let provider = notConfiguredProvider;
 
 /** Install a real store implementation at app startup. */
 export function setPurchaseProvider(next) {
