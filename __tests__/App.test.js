@@ -1,8 +1,8 @@
 /**
  * What the very first frame shows. Two things have to be read out of storage
- * before the app knows what to render — whether onboarding has been seen, and
- * whether Pro was bought — and both of them default to the *wrong* answer
- * while the read is in flight.
+ * before the app knows what to render — the settings, which carry whether
+ * onboarding has been seen, and whether Pro was bought — and both of them
+ * default to the *wrong* answer while the read is in flight.
  */
 jest.mock('expo-image-picker', () => ({
   requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
@@ -20,17 +20,21 @@ const mockReads = new Map();
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn((key) => mockReads.get(key)),
   setItem: jest.fn(async () => {}),
+  removeItem: jest.fn(async () => {}),
 }));
 
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import App from '../App';
 import HomeScreen from '../src/screens/HomeScreen';
 import OnboardingScreen from '../src/screens/OnboardingScreen';
 
-const ONBOARDED_KEY = 'drawdraw.onboarded.v1';
+const SETTINGS_KEY = 'drawdraw.settings.v1';
+const ONBOARDED_KEY = 'drawdraw.onboarded.v1'; // what the build before settings wrote
 const ENTITLEMENTS_KEY = 'drawdraw.entitlements.v1';
+const SEEN = JSON.stringify({ seenIntro: true });
 
 /** A stored value whose read this test resolves by hand. */
 function deferred() {
@@ -52,7 +56,7 @@ afterEach(async () => {
 
 it('shows a paying customer nothing at all rather than the free build', async () => {
   const entitlements = deferred();
-  mockReads.set(ONBOARDED_KEY, Promise.resolve('1'));
+  mockReads.set(SETTINGS_KEY, Promise.resolve(SEEN));
   mockReads.set(ENTITLEMENTS_KEY, entitlements.promise);
 
   await act(async () => {
@@ -72,9 +76,9 @@ it('shows a paying customer nothing at all rather than the free build', async ()
   expect(home.props.pro).toBe(true); // and it was never rendered any other way
 });
 
-it('waits for the onboarding flag too', async () => {
-  const onboarded = deferred();
-  mockReads.set(ONBOARDED_KEY, onboarded.promise);
+it('waits for the settings, which hold the onboarding flag, too', async () => {
+  const settings = deferred();
+  mockReads.set(SETTINGS_KEY, settings.promise);
   mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
 
   await act(async () => {
@@ -82,12 +86,29 @@ it('waits for the onboarding flag too', async () => {
   });
   expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(0);
 
-  await act(async () => onboarded.resolve(null));
+  await act(async () => settings.resolve(null));
   expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(1);
 });
 
-it('renders the free build for someone who has not bought it', async () => {
+it('honours the onboarding flag the previous build wrote, and moves it', async () => {
+  // Someone who dismissed the intro before settings existed must not meet it
+  // again: the flag is read from its old key, folded into the settings record
+  // and the old key removed — see src/lib/settingsStore.js.
   mockReads.set(ONBOARDED_KEY, Promise.resolve('1'));
+  mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
+
+  await act(async () => {
+    tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
+  });
+
+  expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(0);
+  expect(tree.root.findAllByType(HomeScreen)).toHaveLength(1);
+  expect(AsyncStorage.setItem).toHaveBeenCalledWith(SETTINGS_KEY, SEEN);
+  expect(AsyncStorage.removeItem).toHaveBeenCalledWith(ONBOARDED_KEY);
+});
+
+it('renders the free build for someone who has not bought it', async () => {
+  mockReads.set(SETTINGS_KEY, Promise.resolve(SEEN));
   mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
 
   await act(async () => {

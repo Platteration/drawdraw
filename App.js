@@ -1,38 +1,46 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Modal, SafeAreaView, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import HomeScreen from './src/screens/HomeScreen';
 import EditorScreen from './src/screens/EditorScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
 import PaywallScreen from './src/screens/PaywallScreen';
 import { useEntitlements } from './src/lib/pro';
+import { loadSettings, persistSettings } from './src/lib/settingsStore';
 import { colors } from './src/theme';
-
-const ONBOARDED_KEY = 'drawdraw.onboarded.v1';
 
 export default function App() {
   // project: null | { id, image: { uri, width, height }, settings }
   const [project, setProject] = useState(null);
-  const [onboarded, setOnboarded] = useState(null); // null while loading
+  const [settings, setSettings] = useState(null); // null while loading
+  const [replayingIntro, setReplayingIntro] = useState(false);
   const [paywall, setPaywall] = useState(false);
   const { pro, ready: entitlementsRead, purchase, restore } = useEntitlements();
 
-  // Nothing is rendered until both the onboarding flag and the stored
-  // entitlement have been read. `pro` starts false, so rendering earlier shows
-  // a paying customer the free build for a frame — the guide visibly loses its
-  // Pro construction lines and then gains them back, and the home screen
-  // offers to sell them something they already own.
+  // Nothing is rendered until both the settings (which carry the onboarding
+  // flag) and the stored entitlement have been read. `pro` starts false, so
+  // rendering earlier shows a paying customer the free build for a frame — the
+  // guide visibly loses its Pro construction lines and then gains them back,
+  // and the home screen offers to sell them something they already own.
   useEffect(() => {
-    AsyncStorage.getItem(ONBOARDED_KEY)
-      .then((v) => setOnboarded(v === '1'))
-      .catch(() => setOnboarded(true));
+    loadSettings().then(setSettings);
   }, []);
 
+  const updateSettings = useCallback((patch) => {
+    setSettings((prev) => {
+      const next = { ...prev, ...patch };
+      persistSettings(next).catch(() => {});
+      return next;
+    });
+  }, []);
+
+  // Replaying the intro from the home screen is a thing this session does,
+  // not a change to what has been seen: closing the app mid-replay does not
+  // bring the intro back on the next launch.
   const finishOnboarding = () => {
-    setOnboarded(true);
-    AsyncStorage.setItem(ONBOARDED_KEY, '1').catch(() => {});
+    setReplayingIntro(false);
+    if (!settings.seenIntro) updateSettings({ seenIntro: true });
   };
 
   return (
@@ -43,7 +51,7 @@ export default function App() {
     // nothing in the tree supplies insets to compensate.
     <SafeAreaView style={styles.root}>
       <StatusBar style="dark" />
-      {onboarded === null || !entitlementsRead ? null : onboarded === false ? (
+      {settings === null || !entitlementsRead ? null : !settings.seenIntro || replayingIntro ? (
         <OnboardingScreen onDone={finishOnboarding} />
       ) : project ? (
         <EditorScreen
@@ -57,7 +65,7 @@ export default function App() {
           onOpenProject={setProject}
           pro={pro}
           onRequestPro={() => setPaywall(true)}
-          onReplayIntro={() => setOnboarded(false)}
+          onReplayIntro={() => setReplayingIntro(true)}
         />
       )}
 

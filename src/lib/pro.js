@@ -2,8 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { purchases } from './purchases';
+import { cleanEntitlements, KEYS } from './settings';
 
-const KEY = 'drawdraw.entitlements.v1';
+const KEY = KEYS.entitlements;
 
 /**
  * What Pro unlocks — and, just as importantly, what it does not. The method
@@ -27,9 +28,11 @@ export const FREE_FEATURES = [
 async function read() {
   try {
     const raw = await AsyncStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : {};
+    // Cleaned on the way in: `grant` writes this record back, so anything a
+    // stored copy carried would otherwise be persisted for good.
+    return cleanEntitlements(raw ? JSON.parse(raw) : null);
   } catch {
-    return {};
+    return cleanEntitlements(null);
   }
 }
 
@@ -54,7 +57,7 @@ export function useEntitlements() {
 
   useEffect(() => {
     read()
-      .then((e) => setPro(!!e.pro))
+      .then((e) => setPro(e.pro))
       // The app holds its first frame until `ready`, so this must settle even
       // if storage is unavailable — better a free build than a blank screen.
       .finally(() => setReady(true));

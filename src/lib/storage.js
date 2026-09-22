@@ -3,8 +3,9 @@ import * as FileSystem from 'expo-file-system';
 
 import { portraitExtension } from './filenames';
 import { hasTraversal, sanitizeProjects } from './projectShape';
+import { KEYS } from './settings';
 
-const INDEX_KEY = 'drawdraw.projects.v1';
+const INDEX_KEY = KEYS.projects;
 const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
 const MAX_PROJECTS = 30;
 
