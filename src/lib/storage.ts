@@ -8,12 +8,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { portraitExtension } from './filenames';
-import { hasTraversal, sanitizeProjects } from './projectShape';
+import { hasTraversal, sanitizeProjects, type Project, type ProjectSettings } from './projectShape';
 import { KEYS } from './settings';
 
 const INDEX_KEY = KEYS.projects;
 const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
 const MAX_PROJECTS = 30;
+
+/** A new project; `ephemeral` when its image could not be copied and it was kept out of the index. */
+export type CreatedProject = Project & { ephemeral?: true };
 
 /**
  * Projects keep the portrait plus everything about how the guide was fitted
@@ -30,7 +33,7 @@ const MAX_PROJECTS = 30;
  * app can reach and nothing but reinstalling can clear.
  */
 
-async function ensureDir() {
+async function ensureDir(): Promise<void> {
   const info = await FileSystem.getInfoAsync(PORTRAIT_DIR);
   if (!info.exists) {
     await FileSystem.makeDirectoryAsync(PORTRAIT_DIR, { intermediates: true });
@@ -48,24 +51,24 @@ async function ensureDir() {
  * of one. sanitizeProject refuses such a URI on the way in as well; the two
  * are deliberately redundant, because this is the call that deletes.
  */
-async function removePortrait(uri) {
+async function removePortrait(uri: unknown): Promise<void> {
   if (typeof uri !== 'string' || !uri.startsWith(PORTRAIT_DIR)) return;
   if (hasTraversal(uri)) return;
   await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
 }
 
-export async function listProjects() {
+export async function listProjects(): Promise<Project[]> {
   try {
     const raw = await AsyncStorage.getItem(INDEX_KEY);
     // Written by this app, but not necessarily by this build of it, and not
-    // necessarily completely. See projectShape.js.
+    // necessarily completely. See projectShape.ts.
     return sanitizeProjects(raw ? JSON.parse(raw) : []);
   } catch {
     return [];
   }
 }
 
-async function writeIndex(projects) {
+async function writeIndex(projects: Project[]): Promise<void> {
   await AsyncStorage.setItem(INDEX_KEY, JSON.stringify(projects));
 }
 
@@ -78,7 +81,11 @@ async function writeIndex(projects) {
  * a cache the OS is free to clear, with no way to repair it from inside the
  * app. The caller is expected to say so.
  */
-export async function createProject(asset) {
+export async function createProject(asset: {
+  uri: string;
+  width: number;
+  height: number;
+}): Promise<CreatedProject> {
   const id = `p${Date.now().toString(36)}`;
   let uri = asset.uri;
   let durable = false;
@@ -92,7 +99,7 @@ export async function createProject(asset) {
     // Fall back to the original URI; the project still works this session.
   }
 
-  const project = {
+  const project: Project = {
     id,
     updatedAt: Date.now(),
     image: { uri, width: asset.width, height: asset.height },
@@ -109,7 +116,7 @@ export async function createProject(asset) {
   return project;
 }
 
-export async function saveSettings(id, settings) {
+export async function saveSettings(id: string, settings: ProjectSettings): Promise<void> {
   const projects = await listProjects();
   const next = projects.map((p) =>
     p.id === id ? { ...p, settings, updatedAt: Date.now() } : p
@@ -118,7 +125,7 @@ export async function saveSettings(id, settings) {
   await writeIndex(next);
 }
 
-export async function deleteProject(id) {
+export async function deleteProject(id: string): Promise<void> {
   const projects = await listProjects();
   const target = projects.find((p) => p.id === id);
   await writeIndex(projects.filter((p) => p.id !== id));

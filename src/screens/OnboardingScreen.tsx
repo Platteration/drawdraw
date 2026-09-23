@@ -12,14 +12,20 @@ import {
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
-import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
+import { buildHeadWireframe, HEAD_HEIGHT_UNITS, type ElementSet, type Polyline } from '../lib/headModel';
+
+interface PageView {
+  yaw: number;
+  pitch: number;
+  elements: ElementSet;
+}
 
 /**
  * Three pages that teach the method rather than tour the UI: what the three
  * segments are, why they have to be three-dimensional, and what you get out
  * at the end.
  */
-const PAGES = [
+const PAGES: readonly { title: string; body: string; view: PageView }[] = [
   {
     title: 'Three segments',
     body:
@@ -40,10 +46,10 @@ const PAGES = [
   },
 ];
 
-function PageArt({ yaw, pitch, elements, size }) {
+function PageArt({ yaw, pitch, elements, size }: PageView & { size: number }) {
   const wire = buildHeadWireframe(yaw, pitch, 0, { elements });
   const ppu = (size * 0.8) / HEAD_HEIGHT_UNITS;
-  const toPath = ({ points, closed }) =>
+  const toPath = ({ points, closed }: Polyline) =>
     points
       .map(
         (p, i) =>
@@ -71,12 +77,12 @@ function PageArt({ yaw, pitch, elements, size }) {
   );
 }
 
-export default function OnboardingScreen({ onDone }) {
+export default function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const width = Dimensions.get('window').width;
   const [page, setPage] = useState(0);
-  const scroller = useRef(null);
+  const scroller = useRef<ScrollView>(null);
 
-  const goTo = (next) => {
+  const goTo = (next: number) => {
     if (next >= PAGES.length) {
       onDone();
       return;

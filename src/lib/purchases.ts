@@ -35,7 +35,33 @@
  * says, because only a provider knows the localised price — and, until one is
  * configured, that nothing is for sale.
  */
-export const PRODUCTS = {
+export interface Product {
+  id: string;
+  title: string;
+  blurb: string;
+  price: string;
+  kind: string;
+}
+
+/**
+ * What `purchase` and `restore` resolve with: `pro: true` only for an
+ * entitlement actually acquired, and whatever else the store SDK reported
+ * beside it, which nothing here reads.
+ */
+export interface PurchaseResult {
+  pro?: boolean;
+  [field: string]: unknown;
+}
+
+/** The three calls a store implementation answers, and whether one is configured. */
+export interface PurchaseProvider {
+  readonly configured: boolean;
+  getProducts(): Promise<Product[]>;
+  purchase(productId: string): Promise<PurchaseResult | null | undefined>;
+  restore(): Promise<PurchaseResult | null | undefined>;
+}
+
+export const PRODUCTS: { pro: Product } = {
   pro: {
     id: 'com.platteration.drawdraw.pro',
     title: 'DrawDraw Pro',
@@ -48,12 +74,12 @@ export const PRODUCTS = {
 /** What the unconfigured provider says in place of a price. Not a currency amount, on purpose. */
 export const NOT_CONFIGURED_PRICE = 'not available in this build';
 
-class NotConfiguredProvider {
-  get configured() {
+class NotConfiguredProvider implements PurchaseProvider {
+  get configured(): boolean {
     return false;
   }
 
-  async getProducts() {
+  async getProducts(): Promise<Product[]> {
     // Every build runs this provider until setPurchaseProvider names a real
     // one — the web build the e2e drives included — and a button reading
     // "$7.99" that takes no payment misrepresents what the tap does.
@@ -62,38 +88,36 @@ class NotConfiguredProvider {
     return Object.values(PRODUCTS).map((p) => ({ ...p, price: NOT_CONFIGURED_PRICE }));
   }
 
-  async purchase() {
-    const error = new Error(
-      'In-app purchases are not configured in this build. Add a store provider in src/lib/purchases.js.'
+  async purchase(): Promise<never> {
+    throw Object.assign(
+      new Error('In-app purchases are not configured in this build. Add a store provider in src/lib/purchases.ts.'),
+      { code: 'not_configured' }
     );
-    error.code = 'not_configured';
-    throw error;
   }
 
-  async restore() {
-    const error = new Error(
-      'In-app purchases are not configured in this build. Add a store provider in src/lib/purchases.js.'
+  async restore(): Promise<never> {
+    throw Object.assign(
+      new Error('In-app purchases are not configured in this build. Add a store provider in src/lib/purchases.ts.'),
+      { code: 'not_configured' }
     );
-    error.code = 'not_configured';
-    throw error;
   }
 }
 
 /** The provider a build runs with until `setPurchaseProvider` names a real one. */
 export const notConfiguredProvider = new NotConfiguredProvider();
 
-let provider = notConfiguredProvider;
+let provider: PurchaseProvider = notConfiguredProvider;
 
 /** Install a real store implementation at app startup. */
-export function setPurchaseProvider(next) {
+export function setPurchaseProvider(next: PurchaseProvider): void {
   provider = next;
 }
 
-export const purchases = {
+export const purchases: PurchaseProvider = {
   get configured() {
     return provider.configured;
   },
-  getProducts: (...args) => provider.getProducts(...args),
-  purchase: (...args) => provider.purchase(...args),
-  restore: (...args) => provider.restore(...args),
+  getProducts: (...args: Parameters<PurchaseProvider['getProducts']>) => provider.getProducts(...args),
+  purchase: (...args: Parameters<PurchaseProvider['purchase']>) => provider.purchase(...args),
+  restore: (...args: Parameters<PurchaseProvider['restore']>) => provider.restore(...args),
 };

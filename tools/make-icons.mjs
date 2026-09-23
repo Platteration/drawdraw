@@ -23,12 +23,11 @@ import { dirname, join } from 'node:path';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// headModel.js is ESM but lives in a CommonJS-by-default package and imports
-// nothing itself, so it loads cleanly as a data: module.
-const source = readFileSync(join(root, 'src/lib/headModel.js'), 'utf8');
-const { buildHeadWireframe, HEAD_HEIGHT_UNITS } = await import(
-  `data:text/javascript,${encodeURIComponent(source)}`
-);
+// headModel.ts imports nothing and uses only erasable TypeScript (annotations,
+// interfaces, type aliases), so Node 22.18 and later load it by its own name:
+// they strip the types by default. The package has no "type" field, so Node
+// warns once (MODULE_TYPELESS_PACKAGE_JSON) that it detected ES module syntax.
+const { buildHeadWireframe, HEAD_HEIGHT_UNITS } = await import('../src/lib/headModel.ts');
 
 const PAPER = [0xf4, 0xef, 0xe6];
 const SANGUINE = [0xb4, 0x54, 0x3a];

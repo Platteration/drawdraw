@@ -26,7 +26,7 @@ const VIEW = { width: 390, height: 500 }; // the photo as the editor displays it
 const POSE = { yaw: 0, pitch: 0, roll: 0, x: 0.5, y: 0.45, scale: 0.6 };
 
 /**
- * The arithmetic a restored pose actually reaches — HeadGuide.js:38-48, which
+ * The arithmetic a restored pose actually reaches — HeadGuide.tsx:60-73, which
  * writes `scale`, `x` and `y` straight into the `d` attribute. Repeated here
  * rather than imported because HeadGuide renders react-native-svg; it is what
  * makes the expectation below independent of the sanitizer's own constants.
@@ -102,7 +102,7 @@ describe('sanitizeProject', () => {
   });
 
   it('refuses a file URI that climbs out of the directory it names', () => {
-    // removePortrait's guard is a prefix test (storage.js), and every one of
+    // removePortrait's guard is a prefix test (storage.ts), and every one of
     // these passes a prefix test while naming a file outside the portraits
     // directory — deleteAsync resolves the `..` and deletes what it finds,
     // which the MAX_PROJECTS truncation fires on its own. An authority is the
@@ -310,7 +310,7 @@ describe('sanitizeSettings', () => {
   });
 
   it('holds the two appearance sliders to their own ranges', () => {
-    // HeadGuide's depth taper, transcribed (HeadGuide.js:58-59): a finite,
+    // HeadGuide's depth taper, transcribed (HeadGuide.tsx:83-84): a finite,
     // positive lineWeight the sliders could never write reaches strokeWidth as
     // Infinity, which neither renderer rejects and neither draws.
     const widthOf = (thickness, bucket) => thickness * (0.7 + (0.55 * bucket) / 3);

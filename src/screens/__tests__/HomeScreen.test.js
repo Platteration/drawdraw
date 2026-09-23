@@ -9,6 +9,9 @@ import renderer, { act } from 'react-test-renderer';
 import { Alert, Platform } from 'react-native';
 
 jest.mock('expo-image-picker', () => ({
+  // The real enum, so the call below is checked against the value it carries.
+  UIImagePickerPreferredAssetRepresentationMode: jest.requireActual('expo-image-picker')
+    .UIImagePickerPreferredAssetRepresentationMode,
   requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ granted: false })),
   requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
   launchImageLibraryAsync: jest.fn(async () => ({ canceled: true })),

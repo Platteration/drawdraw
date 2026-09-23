@@ -39,18 +39,32 @@ import {
   ELEMENTS,
   PROPORTION_PRESETS,
   PROPORTION_RANGES,
+  type ElementKey,
+  type ElementSet,
+  type HeadTransform,
+  type Point2,
+  type Proportions,
 } from '../lib/headModel';
+import { errorText } from '../lib/errors';
 import { captureSize } from '../lib/exportSize';
 import { haptics } from '../lib/feedback';
+import type { Project, ProjectSettings } from '../lib/projectShape';
 import { saveSettings } from '../lib/storage';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
+
+type Mode = 'rotate' | 'move' | 'lines' | 'fit';
+type Panel = 'guide' | 'build' | 'style';
+interface Size {
+  width: number;
+  height: number;
+}
 
 const THIRDS = [1 / 3, 2 / 3];
 const MAX_EXPORT_DIMENSION = 4096;
 const TURNAROUND_SCALE = 3; // sheet is laid out small and captured at 3×
 const STEP_INTERVAL = 1100;
 
-const DEFAULT_HEAD = { yaw: 0, pitch: 0, roll: 0, x: 0.5, y: 0.45, scale: 0.6 };
+const DEFAULT_HEAD: HeadTransform = { yaw: 0, pitch: 0, roll: 0, x: 0.5, y: 0.45, scale: 0.6 };
 const VIEW_PRESETS = [
   { label: 'Front', yaw: 0, pitch: 0 },
   { label: '¾', yaw: 40, pitch: 0 },
@@ -62,21 +76,28 @@ const VIEW_PRESETS = [
 /** Construction order used by step-by-step reveal. */
 const BUILD_ORDER = ELEMENTS.map((el) => el.key);
 
-export default function EditorScreen({ project, onClose, pro = false, onRequestPro = () => {} }) {
+export interface EditorScreenProps {
+  project: Project;
+  onClose: () => void;
+  pro?: boolean;
+  onRequestPro?: () => void;
+}
+
+export default function EditorScreen({ project, onClose, pro = false, onRequestPro = () => {} }: EditorScreenProps) {
   const image = project.image;
-  const saved = project.settings || {};
+  const saved: ProjectSettings = project.settings || {};
 
   // 3D thirds head: chin→nose, nose→brow, brow→crown segment rings on a
   // rotatable head, positioned over the portrait.
   const [showHead, setShowHead] = useState(saved.showHead ?? true);
   const [headTransform, setHeadTransform] = useState(saved.headTransform ?? DEFAULT_HEAD);
-  const [mode, setMode] = useState('rotate'); // 'rotate' | 'move' | 'lines' | 'fit'
-  const [fitTaps, setFitTaps] = useState([]);
+  const [mode, setMode] = useState<Mode>('rotate');
+  const [fitTaps, setFitTaps] = useState<Point2[]>([]);
   const [interacting, setInteracting] = useState(false); // a gesture is in flight
 
   // Which construction lines are drawn, and the head's proportions.
-  const [elements, setElements] = useState(saved.elements ?? DEFAULT_ELEMENTS);
-  const [proportions, setProportions] = useState(saved.proportions ?? DEFAULT_PROPORTIONS);
+  const [elements, setElements] = useState<ElementSet>(saved.elements ?? DEFAULT_ELEMENTS);
+  const [proportions, setProportions] = useState<Proportions>(saved.proportions ?? DEFAULT_PROPORTIONS);
 
   // Optional flat 2D guide lines (fractions of the image), draggable.
   const [hGuides, setHGuides] = useState(saved.hGuides ?? THIRDS);
@@ -88,7 +109,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const [guideColor, setGuideColor] = useState(saved.guideColor ?? GUIDE_COLORS[0].value);
   const [lineWeight, setLineWeight] = useState(saved.lineWeight ?? 2);
   const [tracingOpacity, setTracingOpacity] = useState(saved.tracingOpacity ?? 0.3);
-  const [panel, setPanel] = useState('guide'); // 'guide' | 'build' | 'style'
+  const [panel, setPanel] = useState<Panel>('guide');
 
   // Practice mode hides the photo so you draw from the guide alone.
   const [practice, setPractice] = useState(false);
@@ -96,27 +117,27 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
 
   // Step-by-step reveal: null when off, otherwise how far through the
   // construction order we are.
-  const [step, setStep] = useState(null);
+  const [step, setStep] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
 
-  const [viewport, setViewport] = useState(null); // area available for the image
+  const [viewport, setViewport] = useState<Size | null>(null); // area available for the image
   const [busy, setBusy] = useState(false);
 
-  const combinedRef = useRef(null); // photo + guides
-  const guidesOnlyRef = useRef(null); // guides on transparency
-  const tracingRef = useRef(null); // faded photo on transparency
-  const turnaroundRef = useRef(null); // six-view contact sheet
+  const combinedRef = useRef<View>(null); // photo + guides
+  const guidesOnlyRef = useRef<View>(null); // guides on transparency
+  const tracingRef = useRef<View>(null); // faded photo on transparency
+  const turnaroundRef = useRef<View>(null); // six-view contact sheet
 
   // Elements actually drawn: the step sequence overrides manual toggles.
   const activeElements = useMemo(() => {
-    const chosen = {};
+    const chosen: ElementSet = {};
     if (step === null) {
       Object.assign(chosen, elements);
     } else {
-      for (let i = 0; i <= step && i < BUILD_ORDER.length; i++) chosen[BUILD_ORDER[i]] = true;
+      for (let i = 0; i <= step && i < BUILD_ORDER.length; i++) chosen[BUILD_ORDER[i]!] = true; // i < length
     }
     if (pro) return chosen;
-    const free = {};
+    const free: ElementSet = {};
     for (const el of ELEMENTS) if (!el.pro && chosen[el.key]) free[el.key] = true;
     return free;
   }, [step, elements, pro]);
@@ -170,7 +191,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   // Debounced autosave. The timer id doubles as "there is an unsaved change":
   // the cleanup below cancels the pending write on every keystroke-sized edit,
   // and only the write itself clears the ref.
-  const pendingSave = useRef(null);
+  const pendingSave = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestSettings = useRef(settings);
 
   useEffect(() => {
@@ -179,7 +200,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
       pendingSave.current = null;
       saveSettings(project.id, settings).catch(() => {});
     }, 600);
-    return () => clearTimeout(pendingSave.current);
+    return () => clearTimeout(pendingSave.current ?? undefined);
   }, [project.id, settings]);
 
   // Leaving the editor unmounts it, which used to cancel the pending write and
@@ -235,7 +256,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const exportW = Math.round(image.width * exportScale);
   const exportH = Math.round(image.height * exportScale);
 
-  const updateGuide = (setter) => (index, fraction) =>
+  const updateGuide = (setter: React.Dispatch<React.SetStateAction<number[]>>) => (index: number, fraction: number) =>
     setter((prev) => prev.map((f, i) => (i === index ? fraction : f)));
   const updateH = updateGuide(setHGuides);
   const updateV = updateGuide(setVGuides);
@@ -249,8 +270,9 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     setPlaying(false);
   };
 
-  const toggleElement = (key) => setElements((prev) => ({ ...prev, [key]: !prev[key] }));
-  const setProportion = (key, value) => setProportions((prev) => ({ ...prev, [key]: value }));
+  const toggleElement = (key: ElementKey) => setElements((prev) => ({ ...prev, [key]: !prev[key] }));
+  const setProportion = (key: keyof Proportions, value: number) =>
+    setProportions((prev) => ({ ...prev, [key]: value }));
 
   const startFit = () => {
     setFitTaps([]);
@@ -258,7 +280,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     setShowHead(true);
   };
 
-  const handleFitTap = (point) => {
+  const handleFitTap = (point: Point2) => {
     const taps = [...fitTaps, point];
     if (taps.length < FIT_STEPS.length) {
       setFitTaps(taps);
@@ -280,8 +302,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   };
 
   // `size` is the wanted output in PIXELS; captureSize turns it into whatever
-  // unit this platform's view-shot expects (see src/lib/exportSize.js).
-  const exportView = async (ref, name, size) => {
+  // unit this platform's view-shot expects (see src/lib/exportSize.ts).
+  const exportView = async (ref: React.RefObject<View | null>, name: string, size: Size) => {
     if (busy || !ref.current) return;
     setBusy(true);
     try {
@@ -328,7 +350,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                 await MediaLibrary.saveToLibraryAsync(uri);
                 Alert.alert('Saved', `${name} was saved to your photo library.`);
               } catch (err) {
-                Alert.alert('Save failed', String(err?.message ?? err));
+                Alert.alert('Save failed', errorText(err));
               } finally {
                 release();
               }
@@ -344,7 +366,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                   Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
                 }
               } catch (err) {
-                Alert.alert('Share failed', String(err?.message ?? err));
+                Alert.alert('Share failed', errorText(err));
               } finally {
                 release();
               }
@@ -357,7 +379,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         { onDismiss: release }
       );
     } catch (err) {
-      Alert.alert('Export failed', String(err?.message ?? err));
+      Alert.alert('Export failed', errorText(err));
     } finally {
       setBusy(false);
     }
@@ -373,7 +395,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const photoVisible = !practice || peeking;
 
   // Everything that goes on top of the photo, mirrored 1:1 in the exports.
-  const renderGuides = ({ draft = false } = {}) => (
+  const renderGuides = ({ draft = false }: { draft?: boolean } = {}) => (
     <>
       {anyLines && (
         <GuideOverlay
@@ -576,10 +598,11 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
               />
               {step !== null && (
                 <>
-                  <Chip label="‹" onPress={() => setStep((s) => Math.max(0, s - 1))} />
+                  {/* s is never null while these show; `?? 0` is what null did in arithmetic */}
+                  <Chip label="‹" onPress={() => setStep((s) => Math.max(0, (s ?? 0) - 1))} />
                   <Chip
                     label="›"
-                    onPress={() => setStep((s) => Math.min(BUILD_ORDER.length - 1, s + 1))}
+                    onPress={() => setStep((s) => Math.min(BUILD_ORDER.length - 1, (s ?? 0) + 1))}
                   />
                   <Chip
                     label={playing ? 'Pause' : 'Play'}
@@ -587,7 +610,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                     onPress={() => setPlaying((p) => !p)}
                   />
                   <Text style={styles.stepLabel}>
-                    {step + 1}/{BUILD_ORDER.length} · {ELEMENTS[step].label}
+                    {step + 1}/{BUILD_ORDER.length} · {ELEMENTS[step]?.label}
                   </Text>
                 </>
               )}

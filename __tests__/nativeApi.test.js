@@ -3,7 +3,7 @@
  * app makes, so a module whose API moves under an SDK upgrade stays green
  * there while the app throws on a device. SDK 54 and 56 did exactly that:
  * the package roots of expo-file-system and expo-media-library became object
- * APIs, and the functions src/lib/storage.js and EditorScreen.js call are, at
+ * APIs, and the functions src/lib/storage.ts and EditorScreen.tsx call are, at
  * those roots, stubs documented to throw at runtime. jest-expo mocks even the
  * legacy file system, so the real modules cannot be loaded here; this reads
  * what each installed package declares instead, and holds every name the app
@@ -15,17 +15,17 @@ const path = require('path');
 const root = path.join(__dirname, '..');
 const read = (file) => fs.readFileSync(file, 'utf8');
 
-/** Every .js file under `dir`, split by whether it sits in a __tests__ folder. */
+/** Every source file (.js, .jsx, .ts, .tsx) under `dir`, split by whether it sits in a __tests__ folder. */
 function sources(dir, out = { app: [], tests: [] }, inTests = false) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) sources(full, out, inTests || entry.name === '__tests__');
-    else if (entry.name.endsWith('.js')) (inTests ? out.tests : out.app).push(full);
+    else if (/\.[jt]sx?$/.test(entry.name)) (inTests ? out.tests : out.app).push(full);
   }
   return out;
 }
 const { app, tests } = sources(path.join(root, 'src'));
-app.push(path.join(root, 'App.js'), path.join(root, 'index.js'));
+app.push(path.join(root, 'App.tsx'), path.join(root, 'index.ts'));
 tests.push(...sources(path.join(root, '__tests__'), undefined, true).tests);
 
 /** The package a specifier belongs to: `expo-file-system/legacy` is expo-file-system's. */

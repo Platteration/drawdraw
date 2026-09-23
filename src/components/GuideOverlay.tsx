@@ -8,7 +8,15 @@ import { StyleSheet, View } from 'react-native';
  *
  * guides: { horizontal: number[], vertical: number[] } — fractions in [0, 1].
  */
-export default function GuideOverlay({ width, height, guides, color, thickness }) {
+export interface GuideOverlayProps {
+  width: number;
+  height: number;
+  guides: { horizontal: number[]; vertical: number[] };
+  color: string;
+  thickness: number;
+}
+
+export default function GuideOverlay({ width, height, guides, color, thickness }: GuideOverlayProps) {
   return (
     <View pointerEvents="none" style={[StyleSheet.absoluteFill, { width, height }]}>
       {guides.horizontal.map((fraction, i) => (

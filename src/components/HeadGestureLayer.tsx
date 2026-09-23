@@ -1,19 +1,19 @@
 import React, { useRef } from 'react';
-import { PanResponder, StyleSheet, View } from 'react-native';
+import { PanResponder, StyleSheet, View, type NativeTouchEvent } from 'react-native';
 
 import { haptics } from '../lib/feedback';
-import { HEAD_OFFSET_RANGE } from '../lib/headModel';
+import { HEAD_OFFSET_RANGE, type HeadTransform } from '../lib/headModel';
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
 /**
  * A drag moves the head's centre, which nothing else bounds — it re-anchors on
  * every gesture, so the offsets accumulate and the head can be pushed
  * arbitrarily far from the photo and lost. Holding it to the range the stored
- * pose is allowed (headModel.js) is both what keeps it reachable and what
+ * pose is allowed (headModel.ts) is both what keeps it reachable and what
  * makes the sanitizer's bound the writer's own.
  */
-const place = (start, dx, dy, w, h) => ({
+const place = (start: HeadTransform, dx: number, dy: number, w: number, h: number) => ({
   x: clamp(start.x + dx / w, ...HEAD_OFFSET_RANGE),
   y: clamp(start.y + dy / h, ...HEAD_OFFSET_RANGE),
 });
@@ -25,7 +25,7 @@ const SNAP_WINDOW = 2.5; // degrees
  * Pull yaw onto the nearest standard view when it lands close, and tick the
  * haptic engine once on arrival so the snap is felt as well as seen.
  */
-function snapYaw(yaw, lastSnap) {
+function snapYaw(yaw: number, lastSnap: { current: number | null }): number {
   const nearest = Math.round(yaw / SNAP_STEP) * SNAP_STEP;
   if (Math.abs(yaw - nearest) <= SNAP_WINDOW) {
     if (lastSnap.current !== nearest) {
@@ -40,9 +40,19 @@ function snapYaw(yaw, lastSnap) {
   return yaw;
 }
 
-function touchGeometry(touches) {
+interface TouchGeometry {
+  count: number;
+  x: number;
+  y: number;
+  dist: number;
+  angle: number;
+}
+
+/** Where the fingers are, or null when none is down: there is nothing to measure then. */
+function touchGeometry(touches: readonly NativeTouchEvent[]): TouchGeometry | null {
   const t1 = touches[0];
   const t2 = touches[1];
+  if (!t1) return null;
   if (!t2) {
     return { count: 1, x: t1.pageX, y: t1.pageY, dist: 0, angle: 0 };
   }
@@ -60,6 +70,16 @@ function touchGeometry(touches) {
  *  - one finger: rotate (yaw/pitch) in "rotate" mode, or reposition in "move" mode
  *  - two fingers: pinch to scale, twist to roll, drag to reposition (any mode)
  */
+export interface HeadGestureLayerProps {
+  /** 'move' repositions with one finger; any other mode rotates. */
+  mode: string;
+  transform: HeadTransform;
+  onChange: (next: HeadTransform) => void;
+  width: number;
+  height: number;
+  onInteractingChange?: (interacting: boolean) => void;
+}
+
 export default function HeadGestureLayer({
   mode,
   transform,
@@ -67,12 +87,13 @@ export default function HeadGestureLayer({
   width,
   height,
   onInteractingChange = () => {},
-}) {
+}: HeadGestureLayerProps) {
   const live = useRef({ mode, transform, onChange, width, height, onInteractingChange });
   live.current = { mode, transform, onChange, width, height, onInteractingChange };
 
-  const base = useRef(null); // { transform, geo } snapshot at gesture start
-  const lastSnap = useRef(null); // yaw value most recently snapped to
+  // { transform, geo } snapshot at gesture start
+  const base = useRef<{ transform: HeadTransform; geo: TouchGeometry } | null>(null);
+  const lastSnap = useRef<number | null>(null); // yaw value most recently snapped to
 
   const responder = useRef(
     PanResponder.create({
@@ -80,15 +101,14 @@ export default function HeadGestureLayer({
       onMoveShouldSetPanResponder: () => true,
       onPanResponderGrant: (evt) => {
         live.current.onInteractingChange(true);
-        base.current = {
-          transform: live.current.transform,
-          geo: touchGeometry(evt.nativeEvent.touches),
-        };
+        // A grant comes with a finger down; without one there is nothing to
+        // anchor to, and the moves that follow wait for the next grant.
+        const geo = touchGeometry(evt.nativeEvent.touches);
+        base.current = geo && { transform: live.current.transform, geo };
       },
       onPanResponderMove: (evt) => {
-        const touches = evt.nativeEvent.touches;
-        if (touches.length === 0 || !base.current) return;
-        const geo = touchGeometry(touches);
+        const geo = touchGeometry(evt.nativeEvent.touches);
+        if (!geo || !base.current) return;
 
         // Finger count changed mid-gesture: re-anchor so nothing jumps.
         if (geo.count !== base.current.geo.count) {

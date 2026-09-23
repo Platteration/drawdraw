@@ -28,7 +28,7 @@ describe('storage keys', () => {
     }
   });
 
-  it('are spelled out in settings.js and nowhere else the app ships', () => {
+  it('are spelled out in settings.ts and nowhere else the app ships', () => {
     // A key beside its own module is one the table, a reset and this test
     // cannot see. String literals only: a doc comment naming a key in
     // backticks is how a migration explains itself.
@@ -38,13 +38,13 @@ describe('storage keys', () => {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           if (entry.name !== '__tests__') walk(full);
-        } else if (entry.name.endsWith('.js') && full !== path.join(root, 'src/lib/settings.js')) {
+        } else if (/\.[jt]sx?$/.test(entry.name) && full !== path.join(root, 'src/lib/settings.ts')) {
           if (/['"]drawdraw\.[a-z]+\.v\d/.test(fs.readFileSync(full, 'utf8'))) offenders.push(path.relative(root, full));
         }
       }
     };
     walk(path.join(root, 'src'));
-    expect(/['"]drawdraw\.[a-z]+\.v\d/.test(fs.readFileSync(path.join(root, 'App.js'), 'utf8'))).toBe(false);
+    expect(/['"]drawdraw\.[a-z]+\.v\d/.test(fs.readFileSync(path.join(root, 'App.tsx'), 'utf8'))).toBe(false);
     expect(offenders).toEqual([]);
   });
 });
@@ -118,7 +118,7 @@ describe('the accessibility floor', () => {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) {
           if (entry.name !== '__tests__') walk(full);
-        } else if (entry.name.endsWith('.js')) {
+        } else if (/\.[jt]sx?$/.test(entry.name)) {
           for (const tag of pressableTags(fs.readFileSync(full, 'utf8'))) {
             seen++;
             if (!/\baccessibilityRole=/.test(tag)) missing.push(`${path.relative(root, full)}: ${tag.split('\n')[0]}`);

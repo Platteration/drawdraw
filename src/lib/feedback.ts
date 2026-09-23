@@ -3,18 +3,18 @@ import { Platform } from 'react-native';
 
 /**
  * Every haptic the app fires goes through here, so one flag — set from the
- * settings record by App.js — turns them all off. Best effort: nothing
+ * settings record by App.tsx — turns them all off. Best effort: nothing
  * happens on the web, while the Vibration switch is off, or on a device
  * without a haptic engine, and no caller has to care which.
  */
 let enabled = true;
 
 /** Called by the settings layer; haptics are skipped entirely when off. */
-export function setHapticsEnabled(on) {
+export function setHapticsEnabled(on: boolean): void {
   enabled = on;
 }
 
-const safe = (fn) => {
+const safe = (fn: () => Promise<void>) => {
   if (Platform.OS === 'web' || !enabled) return;
   fn().catch(() => {});
 };

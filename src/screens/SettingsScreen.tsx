@@ -4,6 +4,7 @@ import Constants from 'expo-constants';
 
 import { colors, radius, type } from '../theme';
 import { confirmAction } from '../lib/confirm';
+import type { Settings } from '../lib/settings';
 
 /**
  * The one URL the app hands to the operating system. `Linking.openURL` opens
@@ -19,10 +20,17 @@ export const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 /**
  * Three rows: the one preference the app has, a way back to the defaults, and
  * what this is. There is no theme row on purpose — the app has one palette
- * (src/theme.js), and __tests__/appearance.test.js pins the native config to
+ * (src/theme.ts), and __tests__/appearance.test.js pins the native config to
  * it.
  */
-export default function SettingsScreen({ settings, onChange, onReset, onClose }) {
+export interface SettingsScreenProps {
+  settings: Settings;
+  onChange: (patch: Partial<Settings>) => void;
+  onReset: () => void;
+  onClose: () => void;
+}
+
+export default function SettingsScreen({ settings, onChange, onReset, onClose }: SettingsScreenProps) {
   const reset = () =>
     confirmAction({
       title: 'Reset settings?',

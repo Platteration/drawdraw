@@ -2,6 +2,7 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import HeadGuide from './HeadGuide';
+import type { ElementSet, Proportions } from '../lib/headModel';
 
 export const TURNAROUND_VIEWS = [
   { label: 'Front', yaw: 0, pitch: 0 },
@@ -27,7 +28,15 @@ export const SHEET_SIZE = {
  * Rendered on a transparent ground so it drops into a drawing app as a
  * reference layer.
  */
-export default function TurnaroundSheet({ elements, proportions, color, thickness, roll = 0 }) {
+export interface TurnaroundSheetProps {
+  elements: ElementSet;
+  proportions: Proportions;
+  color: string;
+  thickness: number;
+  roll?: number;
+}
+
+export default function TurnaroundSheet({ elements, proportions, color, thickness, roll = 0 }: TurnaroundSheetProps) {
   return (
     <View style={[styles.sheet, SHEET_SIZE]}>
       {TURNAROUND_VIEWS.map((view) => (

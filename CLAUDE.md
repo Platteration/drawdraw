@@ -1,7 +1,8 @@
 # DrawDraw
 
-Expo / React Native app (iOS + Android) that overlays a rotatable 3D
-three-segment construction head on a portrait photo and exports drawing layers.
+Expo / React Native app (iOS + Android), in TypeScript, that overlays a
+rotatable 3D three-segment construction head on a portrait photo and exports
+drawing layers.
 See README.md for what it does and how the pose fit works.
 
 ## Commands
@@ -21,7 +22,15 @@ npx expo export --platform ios --platform android --output-dir .export-check
 `tsconfig.json` extends `expo/tsconfig.base` the way the sibling apps' do, and
 lists the `jest` and `node` types because the tests read the file system;
 `@types/node` is a devDependency for that reason only, pinned to the Node 22
-line CI runs.
+line CI runs. `App.tsx`, `index.ts` and everything under `src/` are TypeScript;
+the tools that run under plain Node (`tools/`, `e2e/`, `plugins/`, the config
+files) stay JavaScript. Types describe what the code does: no `as` casts, no
+`any`, no `@ts-ignore` or `@ts-expect-error`. An index that can miss is handled
+as a miss; a non-null assertion (`!`) is only for an index the code beside it has
+bounded (a loop condition, a remainder, a length check), with the bound said in
+a comment. A function that is defensive about its input (the storage
+validators, `portraitExtension`, `captureSize`) takes `unknown` or the wide type
+it checks, so its tests can hand it junk without a cast.
 
 `npx expo export` is the fastest way to confirm a change still compiles for both
 platforms. `npm run test:e2e` is how to confirm it actually *runs*: there is no
@@ -30,34 +39,42 @@ before pushing.
 
 ## Where things live
 
-- `src/lib/headModel.js` — all the geometry. The head is an ellipsoid three
+- `src/lib/headModel.ts` — all the geometry. The head is an ellipsoid three
   units tall so each facial segment is one unit. Curves are built in model
   space, rotated, projected orthographically, then split into visible and
   hidden runs. Pure, dependency-free, and covered by tests.
-- `src/lib/fitSolver.js` — recovers a head pose from three taps. Pure, tested.
-- `src/lib/exportSize.js` — turns a wanted export size in pixels into the
+- `src/lib/fitSolver.ts` — recovers a head pose from three taps. Pure, tested.
+- `src/lib/exportSize.ts` — turns a wanted export size in pixels into the
   options `react-native-view-shot` actually reads. iOS takes them as points
   and rasterises at the screen scale, so a pixel count there is multiplied by
   the device scale. Pure, tested.
-- `src/lib/storage.js` and `src/screens/EditorScreen.js` import
+- `src/lib/storage.ts` and `src/screens/EditorScreen.tsx` import
   `expo-file-system/legacy` and `expo-media-library/legacy`: since SDK 54 and 56
   the package roots are object APIs whose functions of the old names are stubs
   that throw. The unit suites mock native modules wholesale, so
   `__tests__/nativeApi.test.js` checks every name the app calls on a mocked
   module against the installed package's own type declarations.
-- `src/lib/projectShape.js` — checks what comes back out of storage. Anything
+- `src/lib/projectShape.ts` — checks what comes back out of storage, and
+  defines the shapes it checks (`Project`, `ProjectSettings`). Anything
   that does not hold up is dropped so the caller's own default applies; it
   invents nothing and never completes an element set. Pure, tested.
-- `src/components/HeadGuide.js` — renders the model with `react-native-svg`.
+- `src/components/HeadGuide.tsx` — renders the model with `react-native-svg`.
   Used both on screen and inside the off-screen export views, which is what
   keeps exports identical to what you see.
-- `src/screens/EditorScreen.js` — the editor; holds the guide state.
+- `src/screens/EditorScreen.tsx` — the editor; holds the guide state.
+- `src/lib/errors.ts` — reads `message` and `code` off a caught value of
+  unknown type, the way the screens' alerts always read them.
 - `plugins/withDebugInternet.js` — config plugin. `app.json` blocks every Android
   permission the app does not use, `INTERNET` included; this adds `INTERNET` back
   to `android/app/src/debug/AndroidManifest.xml` at prebuild, so a development
   build can load its bundle and the release build still has no network
   capability. `__tests__/appConfig.test.js` holds both halves.
-- `tools/make-icons.mjs` — renders `assets/` from `headModel.js`.
+- `tools/make-icons.mjs` — renders `assets/` from `headModel.ts`, which it
+  imports by that name: Node strips the types itself from 22.18 on, which is
+  why `engines.node` says `>=22.18`. Node warns once that the package has no
+  `"type"` field (`MODULE_TYPELESS_PACKAGE_JSON`); that is expected. So
+  `headModel.ts` keeps to erasable TypeScript (no enums, no namespaces) and
+  imports nothing.
 - `e2e/smoke.mjs` — drives the real critical path in a browser and measures
   where the three-tap fit actually lands, against a synthetic portrait laid out
   on known thirds (`e2e/portrait.mjs`). It fails on any console or page error,
@@ -76,7 +93,7 @@ before pushing.
 - Draft rendering (coarser sampling, no depth taper) is for live gestures only.
   Exports always render at full quality.
 - Free features are never watermarked, and there are no ads or consumables.
-  New paid surface goes behind `pro` in `src/lib/pro.js`.
+  New paid surface goes behind `pro` in `src/lib/pro.ts`.
 - Web is a test surface, not a shipping target, but it has to stay working
   because the smoke test rides on it. Prefer a dependency that behaves the same
   on all three platforms over one that needs a web special case.
@@ -111,21 +128,21 @@ which git and the lint config ignore; delete it after a local run.
 
 User preferences are one record under `drawdraw.settings.v1`, beside the project index
 (`drawdraw.projects.v1`) and the Pro flag (`drawdraw.entitlements.v1`); every key is named
-in `KEYS` in `src/lib/settings.js`, and `__tests__/settings-contract.test.js` pins the key
+in `KEYS` in `src/lib/settings.ts`, and `__tests__/settings-contract.test.js` pins the key
 list, the rows (`haptics`, `seenIntro`) and the enum tables (none yet: both fields are
-booleans, and the first enum row adds its table to `TABLES`). `settings.js` is the
-validator — pure, like `projectShape.js` — and every read goes through `cleanSettings` /
+booleans, and the first enum row adds its table to `TABLES`). `settings.ts` is the
+validator — pure, like `projectShape.ts` — and every read goes through `cleanSettings` /
 `cleanEntitlements`, which rebuild a record field by field from the defaults and look tables
 up by own property only (`has`); its test walks `Object.prototype`'s names built with
-`JSON.parse`, and must fail if `has` becomes `in`. `src/lib/settingsStore.js` is the only
+`JSON.parse`, and must fail if `has` becomes `in`. `src/lib/settingsStore.ts` is the only
 module that reads or writes the record, and holds the one migration: the old
 `drawdraw.onboarded.v1` flag is folded into `seenIntro` (read NEW; else read OLD, write NEW,
-remove OLD only after the write succeeded; both present means NEW wins). `App.js` loads the
+remove OLD only after the write succeeded; both present means NEW wins). `App.tsx` loads the
 record before the first frame, gates every haptic through `setHapticsEnabled` in
-`src/lib/feedback.js` (no call site touches `expo-haptics` directly), and shows
+`src/lib/feedback.ts` (no call site touches `expo-haptics` directly), and shows
 `SettingsScreen` in a Modal from the home screen's footer. Reset to defaults is confirmed and
 touches the settings record alone — never projects, Pro or `seenIntro`, which records what
-was shown rather than a preference. Confirmations go through `src/lib/confirm.js`, because
+was shown rather than a preference. Confirmations go through `src/lib/confirm.ts`, because
 react-native-web's `Alert.alert` is an empty stub and a two-button confirm through it did
 nothing on the web build the e2e drives. There is no theme row: the app has one palette, and
 `__tests__/appearance.test.js` pins `userInterfaceStyle: light` to that. About shows the

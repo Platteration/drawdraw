@@ -87,13 +87,13 @@ function appSource() {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== '__tests__') walk(full);
-      } else if (entry.name.endsWith('.js')) {
+      } else if (/\.[jt]sx?$/.test(entry.name)) {
         sources.push(fs.readFileSync(full, 'utf8'));
       }
     }
   };
   walk(path.join(root, 'src'));
-  for (const entry of ['App.js', 'index.js']) {
+  for (const entry of ['App.tsx', 'index.ts']) {
     sources.push(fs.readFileSync(path.join(root, entry), 'utf8'));
   }
   return sources.join('\n');
@@ -239,7 +239,7 @@ describe('what leaves the device', () => {
     // that single call and that single https URL, so a second use is a
     // decision rather than a drift.
     expect(appSource().match(/\bLinking\.\w+\([^)]*\)/g)).toEqual(['Linking.openURL(SOURCE_URL)']);
-    const settingsScreen = fs.readFileSync(path.join(root, 'src/screens/SettingsScreen.js'), 'utf8');
+    const settingsScreen = fs.readFileSync(path.join(root, 'src/screens/SettingsScreen.tsx'), 'utf8');
     expect(/export const SOURCE_URL = '([^']+)'/.exec(settingsScreen)[1]).toBe(
       'https://github.com/Platteration/drawdraw'
     );

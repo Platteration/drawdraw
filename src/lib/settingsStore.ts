@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { cleanSettings, DEFAULTS, KEYS, LEGACY_KEYS } from './settings';
+import { cleanSettings, DEFAULTS, KEYS, LEGACY_KEYS, type Settings } from './settings';
 
 /**
  * The settings record on its way in and out of storage. Every read goes
@@ -17,7 +17,7 @@ import { cleanSettings, DEFAULTS, KEYS, LEGACY_KEYS } from './settings';
  * since. There is no flag saying the migration ran, and none to lose — NEW
  * being present is the idempotence.
  */
-async function migrateOnboarded() {
+async function migrateOnboarded(): Promise<string | null> {
   const old = await AsyncStorage.getItem(LEGACY_KEYS.onboarded);
   if (old == null) return null;
   // The old reader was `v === '1'`; the fold keeps exactly that meaning.
@@ -33,7 +33,7 @@ async function migrateOnboarded() {
 }
 
 /** NEW exists, so OLD is a leftover from a remove that failed. Try again; the next launch will if this fails. */
-async function dropLegacy() {
+async function dropLegacy(): Promise<void> {
   try {
     if ((await AsyncStorage.getItem(LEGACY_KEYS.onboarded)) != null) {
       await AsyncStorage.removeItem(LEGACY_KEYS.onboarded);
@@ -43,7 +43,7 @@ async function dropLegacy() {
   }
 }
 
-function parse(raw) {
+function parse(raw: string | null): unknown {
   if (raw == null) return null;
   try {
     return JSON.parse(raw);
@@ -58,8 +58,8 @@ function parse(raw) {
  * saved either, so the user would meet it on every launch, and that is the
  * one thing the old reader's catch already refused to do.
  */
-export async function loadSettings() {
-  let raw;
+export async function loadSettings(): Promise<Settings> {
+  let raw: string | null;
   try {
     raw = await AsyncStorage.getItem(KEYS.settings);
     if (raw == null) raw = await migrateOnboarded();
@@ -70,6 +70,6 @@ export async function loadSettings() {
   return cleanSettings(parse(raw), DEFAULTS);
 }
 
-export async function persistSettings(settings) {
+export async function persistSettings(settings: Settings): Promise<void> {
   await AsyncStorage.setItem(KEYS.settings, JSON.stringify(settings));
 }

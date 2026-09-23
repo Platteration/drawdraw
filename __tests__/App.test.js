@@ -106,7 +106,7 @@ it('waits for the settings, which hold the onboarding flag, too', async () => {
 it('honours the onboarding flag the previous build wrote, and moves it', async () => {
   // Someone who dismissed the intro before settings existed must not meet it
   // again: the flag is read from its old key, folded into the settings record
-  // and the old key removed — see src/lib/settingsStore.js.
+  // and the old key removed — see src/lib/settingsStore.ts.
   mockReads.set(ONBOARDED_KEY, Promise.resolve('1'));
   mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
 
@@ -142,7 +142,7 @@ it('writes the dismissal of the intro to the settings record', async () => {
 });
 
 it('hands the stored Vibration setting to the haptics gate', async () => {
-  // The gate (feedback.js) and the switch (SettingsScreen) are each tested on
+  // The gate (feedback.ts) and the switch (SettingsScreen) are each tested on
   // their own; this is the one line that connects them.
   mockReads.set(SETTINGS_KEY, Promise.resolve(JSON.stringify({ haptics: false, seenIntro: true })));
   mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));

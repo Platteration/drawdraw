@@ -4,7 +4,15 @@ import Slider from './Slider';
 
 import { colors, radius, type } from '../theme';
 
-export function Chip({ label, active, onPress, disabled, locked }) {
+export interface ChipProps {
+  label: string;
+  active?: boolean;
+  onPress?: () => void;
+  disabled?: boolean;
+  locked?: boolean;
+}
+
+export function Chip({ label, active, onPress, disabled, locked }: ChipProps) {
   return (
     <Pressable
       onPress={onPress}
@@ -25,7 +33,17 @@ export function Chip({ label, active, onPress, disabled, locked }) {
   );
 }
 
-export function SliderRow({ label, value, min, max, step, onChange, format }) {
+export interface SliderRowProps {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step?: number;
+  onChange: (value: number) => void;
+  format?: (value: number) => string;
+}
+
+export function SliderRow({ label, value, min, max, step, onChange, format }: SliderRowProps) {
   return (
     <View style={styles.sliderRow}>
       <Text style={styles.sliderLabel}>{label}</Text>
@@ -42,7 +60,7 @@ export function SliderRow({ label, value, min, max, step, onChange, format }) {
   );
 }
 
-export function SectionLabel({ children }) {
+export function SectionLabel({ children }: { children: React.ReactNode }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
 }
 
@@ -50,7 +68,14 @@ export function Divider() {
   return <View style={styles.divider} />;
 }
 
-export function PrimaryButton({ label, onPress, disabled, tone = 'accent' }) {
+export interface PrimaryButtonProps {
+  label: string;
+  onPress?: () => void;
+  disabled?: boolean;
+  tone?: 'accent' | 'quiet';
+}
+
+export function PrimaryButton({ label, onPress, disabled, tone = 'accent' }: PrimaryButtonProps) {
   return (
     <Pressable
       onPress={onPress}

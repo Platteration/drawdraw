@@ -29,23 +29,28 @@
 /** Platforms whose capture size is a point size rather than a pixel size. */
 const POINT_SIZED_PLATFORMS = ['ios'];
 
-const isPositiveFinite = (n) => typeof n === 'number' && Number.isFinite(n) && n > 0;
+const isPositiveFinite = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n > 0;
 
 /**
  * Capture options for a wanted export of `width` x `height` PIXELS.
  *
- * @param {{width: number, height: number}} pixels wanted output size in pixels
- * @param {{platform?: string, pixelRatio?: number}} device `Platform.OS` and `PixelRatio.get()`
- * @returns {{width: number, height: number}} the `captureRef` size options
+ * @param pixels wanted output size in pixels
+ * @param device `Platform.OS` and `PixelRatio.get()`; a scale that is not a
+ *   positive finite number counts as 1
+ * @returns the `captureRef` size options — the input's own values, untouched,
+ *   when they are not a usable size
  */
-export function captureSize(pixels, { platform, pixelRatio = 1 } = {}) {
+export function captureSize(
+  pixels: { width?: number; height?: number } | null | undefined,
+  { platform, pixelRatio = 1 }: { platform?: string; pixelRatio?: unknown } = {}
+): { width: number | undefined; height: number | undefined } {
   const width = pixels?.width;
   const height = pixels?.height;
   // Nonsense in, nonsense out: leave it to view-shot's own option validation
   // rather than inventing a size the caller did not ask for.
   if (!isPositiveFinite(width) || !isPositiveFinite(height)) return { width, height };
 
-  if (!POINT_SIZED_PLATFORMS.includes(platform)) {
+  if (platform === undefined || !POINT_SIZED_PLATFORMS.includes(platform)) {
     // Pixels are pixels; keep them whole (a canvas dimension truncates).
     return { width: Math.round(width), height: Math.round(height) };
   }

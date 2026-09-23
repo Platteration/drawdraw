@@ -1,6 +1,7 @@
 # DrawDraw
 
-A portrait-drawing app for iOS and Android, built with [Expo](https://expo.dev) / React Native.
+A portrait-drawing app for iOS and Android, built with [Expo](https://expo.dev) / React Native in
+TypeScript.
 
 Load a portrait and DrawDraw overlays the **three-segment head** — the classic method of
 dividing a face into three equal parts: chin→nose, nose→eyebrows, eyebrows→top of the
@@ -53,7 +54,7 @@ A head turned or tilted away from the viewer foreshortens its segments *unequall
 nose and brow — which sit forward on the curve of the face — swing sideways relative to the
 chin. So three points on the midline carry enough information to recover the pose.
 
-`src/lib/fitSolver.js` searches yaw and pitch coarse-to-fine. At each candidate it solves
+`src/lib/fitSolver.ts` searches yaw and pitch coarse-to-fine. At each candidate it solves
 the remaining unknowns — uniform scale, in-plane rotation, translation — in closed form with
 a similarity Procrustes fit, and keeps the orientation with the smallest residual. Because
 roll is applied last in the rotation and the projection is orthographic, the in-plane
@@ -70,7 +71,7 @@ The method itself, fitting it to a photo, and all three portrait exports are fre
 one-time unlock (not a subscription) covering the full construction head, the child /
 infant / stylized proportion packs, turnaround sheets, and the step-by-step lessons.
 
-Billing is deliberately **not wired up in this repo**. `src/lib/purchases.js` defines the
+Billing is deliberately **not wired up in this repo**. `src/lib/purchases.ts` defines the
 provider interface and ships a `NotConfiguredProvider` that reports honestly rather than
 pretending to charge, so the app builds and runs without a billing SDK. Implementing
 `getProducts` / `purchase` / `restore` against StoreKit or Play Billing (directly or
@@ -160,46 +161,49 @@ succeeds. Web is a test surface rather than a shipping target.
 ## Project layout
 
 ```
-App.js                          Root — onboarding, projects, editor, paywall
-src/theme.js                    Sketchbook palette and type
+App.tsx                          Root — onboarding, projects, editor, paywall
+src/theme.ts                     Sketchbook palette and type
 
-src/lib/headModel.js            3D head: ellipsoid, construction curves,
-                                rotation, orthographic projection, hidden-line
-                                splitting, proportion presets
-src/lib/fitSolver.js            Three-tap pose solver (Procrustes + search)
-src/lib/storage.js              Projects: durable image copies + settings
-src/lib/pro.js                  Entitlements and what each tier includes
-src/lib/purchases.js            Store provider seam
-src/lib/settings.js             Storage keys, the settings record and its validator
-src/lib/settingsStore.js        Reads and writes it; migrates the old onboarding flag
-src/lib/feedback.js             Every haptic, behind the Vibration switch
-src/lib/confirm.js              Confirmations that also work on react-native-web
+src/lib/headModel.ts             3D head: ellipsoid, construction curves,
+                                 rotation, orthographic projection, hidden-line
+                                 splitting, proportion presets
+src/lib/fitSolver.ts             Three-tap pose solver (Procrustes + search)
+src/lib/storage.ts               Projects: durable image copies + settings
+src/lib/pro.ts                   Entitlements and what each tier includes
+src/lib/purchases.ts             Store provider seam
+src/lib/settings.ts              Storage keys, the settings record and its validator
+src/lib/settingsStore.ts         Reads and writes it; migrates the old onboarding flag
+src/lib/feedback.ts              Every haptic, behind the Vibration switch
+src/lib/confirm.ts               Confirmations that also work on react-native-web
+src/lib/errors.ts                What a caught error says, for an alert
 
-src/screens/HomeScreen.js       Pick a portrait, reopen recents
-src/screens/EditorScreen.js     The overlay editor and exports
-src/screens/OnboardingScreen.js Three pages teaching the method
-src/screens/PaywallScreen.js    One-time unlock
-src/screens/SettingsScreen.js   Vibration, reset to defaults, about
+src/screens/HomeScreen.tsx       Pick a portrait, reopen recents
+src/screens/EditorScreen.tsx     The overlay editor and exports
+src/screens/OnboardingScreen.tsx Three pages teaching the method
+src/screens/PaywallScreen.tsx    One-time unlock
+src/screens/SettingsScreen.tsx   Vibration, reset to defaults, about
 
-src/components/HeadGuide.js         SVG rendering of the head (screen + export)
-src/components/HeadGestureLayer.js  Rotate / move / pinch / twist, snap haptics
-src/components/FitOverlay.js        Three-tap capture and markers
-src/components/TurnaroundSheet.js   Six-view contact sheet
-src/components/GuideOverlay.js      Flat 2D guide lines
-src/components/DraggableGuide.js    Drag handles for the 2D lines
-src/components/ui.js                Chips, sliders, buttons
+src/components/HeadGuide.tsx         SVG rendering of the head (screen + export)
+src/components/HeadGestureLayer.tsx  Rotate / move / pinch / twist, snap haptics
+src/components/FitOverlay.tsx        Three-tap capture and markers
+src/components/TurnaroundSheet.tsx   Six-view contact sheet
+src/components/GuideOverlay.tsx      Flat 2D guide lines
+src/components/DraggableGuide.tsx    Drag handles for the 2D lines
+src/components/ui.tsx                Chips, sliders, buttons
 
-plugins/withDebugInternet.js    Config plugin: network access in the debug
-                                manifest only, never in the release build
-tools/make-icons.mjs            Renders assets/ from the head model
+plugins/withDebugInternet.js     Config plugin: network access in the debug
+                                 manifest only, never in the release build
+tools/make-icons.mjs             Renders assets/ from the head model
 ```
 
-App icons and the splash mark are generated from `src/lib/headModel.js` rather
+App icons and the splash mark are generated from `src/lib/headModel.ts` rather
 than checked in as opaque art, so the app's mark and its subject cannot drift
 apart. The generator is standard library only — an analytic-coverage line
-rasterizer and a minimal PNG encoder over `node:zlib`.
+rasterizer and a minimal PNG encoder over `node:zlib` — and imports the model
+by its `.ts` name, which Node runs without a build step from 22.18 on (the
+`engines` floor).
 
-The 3D guide has no GL or engine dependency: `headModel.js` rotates and orthographically
+The 3D guide has no GL or engine dependency: `headModel.ts` rotates and orthographically
 projects the head analytically (the silhouette is the projected quadric of the rotated
 ellipsoid), and the result is drawn with `react-native-svg` — which keeps it crisp at export
 resolution and fully capturable in the transparent PNGs. Exports are produced by

@@ -20,7 +20,7 @@ function source(dir) {
       const full = path.join(d, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== '__tests__') walk(full);
-      } else if (entry.name.endsWith('.js')) {
+      } else if (/\.[jt]sx?$/.test(entry.name)) {
         out.push(fs.readFileSync(full, 'utf8'));
       }
     }
@@ -30,7 +30,7 @@ function source(dir) {
 }
 
 it('pins the interface style to the one palette the app has', () => {
-  // src/theme.js is warm paper and graphite, and there is no second palette
+  // src/theme.ts is warm paper and graphite, and there is no second palette
   // to switch to: a Theme row with one option would be a lie, and
   // 'automatic' would let a phone in dark mode invert paper and sanguine
   // (appConfig.test.js holds the Android half of that). If a dark palette
@@ -42,7 +42,9 @@ it('pins the interface style to the one palette the app has', () => {
 });
 
 it('reads no scheme from the OS, and has no second palette to switch to', () => {
-  expect(source('src')).not.toMatch(/useColorScheme|\bAppearance\b/);
+  const src = source('src');
+  expect(src).toMatch(/export const colors\b/); // the scan reached src/theme.ts, so it read the app
+  expect(src).not.toMatch(/useColorScheme|\bAppearance\b/);
   // The palette is one object, not a light/dark pair.
   const theme = require('../src/theme');
   expect(Object.keys(theme).filter((k) => /dark|light|scheme/i.test(k))).toEqual([]);

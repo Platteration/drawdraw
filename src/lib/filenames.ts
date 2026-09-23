@@ -11,9 +11,9 @@ const IMAGE_EXTENSIONS = ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp', 'gif', '
 const FALLBACK = 'jpg';
 
 /** File extension to store an imported portrait under, always a safe value. */
-export function portraitExtension(uri) {
+export function portraitExtension(uri: unknown): string {
   if (typeof uri !== 'string') return FALLBACK;
-  const path = uri.split(/[?#]/)[0]; // drop any query string or fragment
+  const path = uri.split(/[?#]/)[0] ?? ''; // drop any query string or fragment
   const name = path.split('/').pop() || '';
   const dot = name.lastIndexOf('.');
   if (dot <= 0 || dot === name.length - 1) return FALLBACK;

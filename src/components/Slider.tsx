@@ -6,7 +6,17 @@ import { colors } from '../theme';
 const TRACK_HEIGHT = 4;
 const THUMB_SIZE = 22;
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+export interface SliderProps {
+  value: number;
+  min: number;
+  max: number;
+  /** The value snaps to multiples of it; none (or 0) is continuous. */
+  step?: number;
+  onChange: (value: number) => void;
+  accessibilityLabel?: string;
+}
 
 /**
  * A slider drawn the same way as everything else in the app, rather than the
@@ -17,21 +27,21 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
  * Dragging is anchored by deriving the track's page origin at press time
  * (pageX minus locationX), so movement stays correct wherever the row sits.
  */
-export default function Slider({ value, min, max, step, onChange, accessibilityLabel }) {
+export default function Slider({ value, min, max, step, onChange, accessibilityLabel }: SliderProps) {
   const [width, setWidth] = useState(0);
 
   const live = useRef({ value, min, max, step, onChange, width });
   live.current = { value, min, max, step, onChange, width };
   const trackX = useRef(0);
 
-  const quantize = (raw) => {
+  const quantize = (raw: number) => {
     const { min: lo, max: hi, step: s } = live.current;
     const snapped = s ? Math.round(raw / s) * s : raw;
     // Re-round to kill floating point dust from the division above.
     return Number(clamp(snapped, lo, hi).toFixed(6));
   };
 
-  const emit = (pageX) => {
+  const emit = (pageX: number) => {
     const { min: lo, max: hi, width: w, onChange: change } = live.current;
     if (!w) return;
     const fraction = clamp((pageX - trackX.current) / w, 0, 1);
@@ -56,7 +66,7 @@ export default function Slider({ value, min, max, step, onChange, accessibilityL
   const fraction = max > min ? clamp((value - min) / (max - min), 0, 1) : 0;
   const thumbLeft = fraction * width - THUMB_SIZE / 2;
 
-  const nudge = (direction) => {
+  const nudge = (direction: number) => {
     const { value: v, step: s, max: hi, min: lo } = live.current;
     onChange(quantize(v + direction * (s || (hi - lo) / 20)));
   };

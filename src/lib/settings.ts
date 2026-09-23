@@ -6,7 +6,7 @@
  * named here: a key spelled out beside its own module is one that a rename,
  * a reset and the contract test all fail to see. `LEGACY_KEYS` are the ones
  * an earlier build wrote and this one folds into a record above
- * (settingsStore.js does the folding).
+ * (settingsStore.ts does the folding).
  *
  * A record loaded from storage is untrusted. It was written by an older build
  * (missing fields), a newer one (unknown values), or — on the web build, where
@@ -18,8 +18,8 @@
  * `toString` — is truthy on a plain object, and `JSON.parse('{"x":"__proto__"}')`
  * is an ordinary way for one to arrive.
  *
- * Pure and dependency-free on purpose, like projectShape.js: the contract test
- * reads it without a device, and settingsStore.js is the one module that
+ * Pure and dependency-free on purpose, like projectShape.ts: the contract test
+ * reads it without a device, and settingsStore.ts is the one module that
  * touches AsyncStorage.
  */
 
@@ -38,10 +38,19 @@ export const LEGACY_KEYS = {
 /**
  * The settings record. `seenIntro` records what was shown rather than a
  * preference, which is why `resetSettings` keeps it. There is no theme: the
- * app has one palette (src/theme.js), so a row offering a choice would be a
+ * app has one palette (src/theme.ts), so a row offering a choice would be a
  * lie, and `__tests__/appearance.test.js` pins the native config to match.
  */
-export const DEFAULTS = {
+export interface Settings {
+  haptics: boolean;
+  seenIntro: boolean;
+}
+
+export interface Entitlements {
+  pro: boolean;
+}
+
+export const DEFAULTS: Settings = {
   /** Ticks when the guide snaps to a standard view and when a three-tap fit lands. */
   haptics: true,
   seenIntro: false,
@@ -52,29 +61,32 @@ export const DEFAULTS = {
  * the first such field goes through `pick` with its table added here. None
  * today: both fields are booleans.
  */
-export const TABLES = {};
+export const TABLES: Readonly<Record<string, Readonly<Record<string, true>>>> = {};
+
+const isRecord = (raw: unknown): raw is Record<string, unknown> =>
+  raw !== null && typeof raw === 'object' && !Array.isArray(raw);
 
 /** `raw` when it is a plain object, else an empty one — so a missing record reads as all-missing fields. */
-const fields = (raw) => (raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? raw : {});
+const fields = (raw: unknown): Record<string, unknown> => (isRecord(raw) ? raw : {});
 
 /** True when `value` is one of `table`'s own keys — never an inherited one like `constructor` or `toString`. */
-export function has(table, value) {
+export function has<T extends string | number>(table: Readonly<Record<T, unknown>>, value: unknown): value is T {
   if (typeof value !== 'string' && typeof value !== 'number') return false;
   return Object.prototype.hasOwnProperty.call(table, value);
 }
 
 /** `value` when it is one of `table`'s own keys, else `fallback`. */
-export function pick(value, table, fallback) {
+export function pick<T extends string | number>(value: unknown, table: Readonly<Record<T, unknown>>, fallback: T): T {
   return has(table, value) ? value : fallback;
 }
 
 /** `value` when it is a boolean, else `fallback`. `1` and `'true'` are not ours: the app only ever writes booleans. */
-export function bool(value, fallback) {
+export function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
 }
 
 /** The stored settings, with every unknown or missing field replaced from `fallback`. */
-export function cleanSettings(raw, fallback) {
+export function cleanSettings(raw: unknown, fallback: Settings): Settings {
   const s = fields(raw);
   return {
     haptics: bool(s.haptics, fallback.haptics),
@@ -84,13 +96,13 @@ export function cleanSettings(raw, fallback) {
 
 /**
  * The stored entitlement. `pro` is a plain flag with no receipt behind it (see
- * purchases.js for why); anything but `true` is not a purchase.
+ * purchases.ts for why); anything but `true` is not a purchase.
  */
-export function cleanEntitlements(raw) {
+export function cleanEntitlements(raw: unknown): Entitlements {
   return { pro: bool(fields(raw).pro, false) };
 }
 
 /** Every preference back to how it shipped; what the user has already seen stays seen. */
-export function resetSettings(prev) {
+export function resetSettings(prev: Settings): Settings {
   return { ...DEFAULTS, seenIntro: prev.seenIntro };
 }

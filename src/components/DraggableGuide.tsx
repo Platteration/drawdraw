@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { PanResponder, View } from 'react-native';
+import { PanResponder, View, type ViewStyle } from 'react-native';
 
 const HIT_SIZE = 32; // touch target height/width around each line
 
@@ -8,7 +8,15 @@ const HIT_SIZE = 32; // touch target height/width around each line
  * automatically-placed thirds can be nudged to match the face
  * (hairline / brow / nose) before exporting.
  */
-export default function DraggableGuide({ orientation, fraction, onChange, width, height }) {
+export interface DraggableGuideProps {
+  orientation: 'horizontal' | 'vertical';
+  fraction: number;
+  onChange: (fraction: number) => void;
+  width: number;
+  height: number;
+}
+
+export default function DraggableGuide({ orientation, fraction, onChange, width, height }: DraggableGuideProps) {
   // The PanResponder is created once; it reads live props through this ref.
   const live = useRef({ orientation, fraction, onChange, width, height });
   live.current = { orientation, fraction, onChange, width, height };
@@ -32,7 +40,7 @@ export default function DraggableGuide({ orientation, fraction, onChange, width,
     })
   ).current;
 
-  const style =
+  const style: ViewStyle =
     orientation === 'horizontal'
       ? {
           position: 'absolute',

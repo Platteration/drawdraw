@@ -4,14 +4,24 @@ import Svg, { Circle, Line } from 'react-native-svg';
 
 import { colors } from '../theme';
 import { FIT_STEPS } from '../lib/fitSolver';
+import type { Point2 } from '../lib/headModel';
+
+export interface FitOverlayProps {
+  width: number;
+  height: number;
+  taps: readonly Point2[];
+  onTap: (point: Point2) => void;
+  color: string;
+}
 
 /**
  * Collects the three midline taps — chin, base of nose, brow — that the fit
  * solver turns into a head pose. Marks each tap as it lands and connects
  * them, so it reads as measuring the face rather than poking at it.
  */
-export default function FitOverlay({ width, height, taps, onTap, color }) {
+export default function FitOverlay({ width, height, taps, onTap, color }: FitOverlayProps) {
   const stepIndex = Math.min(taps.length, FIT_STEPS.length - 1);
+  const step = FIT_STEPS[stepIndex]!; // 0 <= stepIndex < FIT_STEPS.length
 
   return (
     <View style={[StyleSheet.absoluteFill, { width, height }]}>
@@ -27,19 +37,22 @@ export default function FitOverlay({ width, height, taps, onTap, color }) {
       />
       <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width={width} height={height}>
         {taps.length > 1 &&
-          taps.slice(1).map((tap, i) => (
-            <Line
-              key={`l-${i}`}
-              x1={taps[i].x}
-              y1={taps[i].y}
-              x2={tap.x}
-              y2={tap.y}
-              stroke={color}
-              strokeWidth={1.5}
-              strokeDasharray="4 4"
-              strokeOpacity={0.7}
-            />
-          ))}
+          taps.slice(1).map((tap, i) => {
+            const prev = taps[i]!; // the tap before this one: i + 1 < taps.length
+            return (
+              <Line
+                key={`l-${i}`}
+                x1={prev.x}
+                y1={prev.y}
+                x2={tap.x}
+                y2={tap.y}
+                stroke={color}
+                strokeWidth={1.5}
+                strokeDasharray="4 4"
+                strokeOpacity={0.7}
+              />
+            );
+          })}
         {taps.map((tap, i) => (
           <React.Fragment key={`m-${i}`}>
             <Circle cx={tap.x} cy={tap.y} r={11} stroke={color} strokeWidth={2} fill="none" />
@@ -49,7 +62,7 @@ export default function FitOverlay({ width, height, taps, onTap, color }) {
       </Svg>
       <View pointerEvents="none" style={styles.banner}>
         <Text style={styles.step}>{`${taps.length + 1} of ${FIT_STEPS.length}`}</Text>
-        <Text style={styles.prompt}>{FIT_STEPS[stepIndex].prompt}</Text>
+        <Text style={styles.prompt}>{step.prompt}</Text>
       </View>
     </View>
   );

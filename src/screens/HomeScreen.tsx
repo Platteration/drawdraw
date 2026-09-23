@@ -9,18 +9,20 @@ import {
   View,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import type { ImagePickerResult } from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
 import { confirmAction } from '../lib/confirm';
-import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
+import { buildHeadWireframe, HEAD_HEIGHT_UNITS, type Polyline } from '../lib/headModel';
+import type { Project } from '../lib/projectShape';
 import { createProject, deleteProject, listProjects } from '../lib/storage';
 
 /** Small static ¾-view head, drawn with the real model, as the app's mark. */
-function HeadMark({ size = 118 }) {
+function HeadMark({ size = 118 }: { size?: number }) {
   const wire = buildHeadWireframe(38, 8, 0, { elements: { center: true, eyeLine: true } });
   const ppu = (size * 0.86) / HEAD_HEIGHT_UNITS;
-  const toPath = ({ points, closed }) =>
+  const toPath = ({ points, closed }: Polyline) =>
     points
       .map(
         (p, i) =>
@@ -48,15 +50,23 @@ function HeadMark({ size = 118 }) {
   );
 }
 
+export interface HomeScreenProps {
+  onOpenProject: (project: Project) => void;
+  pro?: boolean;
+  onRequestPro?: () => void;
+  onReplayIntro?: () => void;
+  onOpenSettings?: () => void;
+}
+
 export default function HomeScreen({
   onOpenProject,
   pro = false,
   onRequestPro = () => {},
   onReplayIntro = () => {},
   onOpenSettings = () => {},
-}) {
+}: HomeScreenProps) {
   const [busy, setBusy] = useState(false);
-  const [recents, setRecents] = useState([]);
+  const [recents, setRecents] = useState<Project[]>([]);
 
   const refresh = useCallback(() => {
     listProjects().then(setRecents);
@@ -64,9 +74,9 @@ export default function HomeScreen({
 
   useEffect(refresh, [refresh]);
 
-  const openAsset = async (result) => {
+  const openAsset = async (result: ImagePickerResult) => {
     if (result.canceled || !result.assets || result.assets.length === 0) return;
-    const asset = result.assets[0];
+    const asset = result.assets[0]!; // the line above returned on an empty list
     if (!asset.width || !asset.height) {
       Alert.alert('Unsupported image', 'Could not read the dimensions of that image.');
       return;
@@ -103,7 +113,7 @@ export default function HomeScreen({
         await ImagePicker.launchImageLibraryAsync({
           mediaTypes: ['images'],
           quality: 1,
-          preferredAssetRepresentationMode: 'automatic',
+          preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Automatic,
         })
       );
     } finally {
@@ -129,7 +139,7 @@ export default function HomeScreen({
   // Through the helper rather than Alert.alert directly: react-native-web's
   // Alert is an empty stub, so a confirm made there showed nothing and the
   // long-press did nothing at all on the web build.
-  const confirmDelete = (project) => {
+  const confirmDelete = (project: Project) => {
     confirmAction({
       title: 'Remove drawing?',
       message: 'This removes the saved portrait and its guide setup.',

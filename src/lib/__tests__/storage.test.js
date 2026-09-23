@@ -15,7 +15,7 @@ jest.mock('@react-native-async-storage/async-storage', () => {
   };
 });
 
-// The legacy entry point is the one storage.js imports: the package root has
+// The legacy entry point is the one storage.ts imports: the package root has
 // had the File/Directory API since SDK 54, and its functions of these names
 // throw. A mock of the root would let this suite pass over that.
 jest.mock('expo-file-system/legacy', () => ({
@@ -43,7 +43,7 @@ const realSanitizeProjects = jest.requireActual('../projectShape').sanitizeProje
 
 const INDEX_KEY = 'drawdraw.projects.v1';
 const PORTRAIT_DIR = 'file:///docs/portraits/';
-const MAX_PROJECTS = 30; // storage.js's own ceiling
+const MAX_PROJECTS = 30; // storage.ts's own ceiling
 
 const stored = (projects) => AsyncStorage.__store.set(INDEX_KEY, JSON.stringify(projects));
 const readIndex = () => JSON.parse(AsyncStorage.__store.get(INDEX_KEY));

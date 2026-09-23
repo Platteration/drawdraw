@@ -3,7 +3,7 @@
  * the listing says what the store should charge, and only a provider knows
  * whether anything is for sale and what it costs where the user is.
  */
-// PaywallScreen pulls in pro.js for the feature lists, which pulls in AsyncStorage.
+// PaywallScreen pulls in pro.ts for the feature lists, which pulls in AsyncStorage.
 jest.mock('@react-native-async-storage/async-storage', () => ({
   getItem: jest.fn(async () => null),
   setItem: jest.fn(async () => {}),

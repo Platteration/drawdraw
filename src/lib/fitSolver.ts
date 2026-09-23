@@ -3,7 +3,24 @@ import {
   HEAD_HEIGHT_UNITS,
   HEAD_OFFSET_RANGE,
   projectLandmarks,
+  type HeadTransform,
+  type Point2,
+  type Proportions,
 } from './headModel';
+
+interface Similarity {
+  scale: number;
+  /** Radians. */
+  angle: number;
+  tx: number;
+  ty: number;
+  residual: number;
+}
+
+interface Candidate extends Similarity {
+  yaw: number;
+  pitch: number;
+}
 
 /**
  * Fit the 3D head to a portrait from three taps on the face's midline:
@@ -26,20 +43,28 @@ import {
  */
 
 /**
- * Closed-form similarity fit of model points onto target points.
+ * Closed-form similarity fit of model points onto target points, which are as
+ * many as the model's — the three landmarks and the three taps.
  * Returns { scale, angle (radians), tx, ty, residual }.
  */
-function procrustes(model, target) {
+function procrustes(model: readonly Point2[], target: readonly Point2[]): Similarity | null {
   const n = model.length;
+  // Point i of one list is fitted to point i of the other. Both are three
+  // here (solveHeadFromTaps refuses any other number of taps), and this says
+  // so where the loops below index them.
+  if (target.length !== n) return null;
   let mx = 0;
   let my = 0;
   let qx = 0;
   let qy = 0;
   for (let i = 0; i < n; i++) {
-    mx += model[i].x;
-    my += model[i].y;
-    qx += target[i].x;
-    qy += target[i].y;
+    // i < n, the length of both lists.
+    const a = model[i]!;
+    const b = target[i]!;
+    mx += a.x;
+    my += a.y;
+    qx += b.x;
+    qy += b.y;
   }
   mx /= n;
   my /= n;
@@ -50,10 +75,12 @@ function procrustes(model, target) {
   let cross = 0;
   let norm = 0;
   for (let i = 0; i < n; i++) {
-    const ax = model[i].x - mx;
-    const ay = model[i].y - my;
-    const bx = target[i].x - qx;
-    const by = target[i].y - qy;
+    const a = model[i]!;
+    const b = target[i]!;
+    const ax = a.x - mx;
+    const ay = a.y - my;
+    const bx = b.x - qx;
+    const by = b.y - qy;
     dot += ax * bx + ay * by;
     cross += ax * by - ay * bx;
     norm += ax * ax + ay * ay;
@@ -69,23 +96,33 @@ function procrustes(model, target) {
 
   let residual = 0;
   for (let i = 0; i < n; i++) {
-    const px = scale * (cos * model[i].x - sin * model[i].y) + tx;
-    const py = scale * (sin * model[i].x + cos * model[i].y) + ty;
-    residual += (px - target[i].x) ** 2 + (py - target[i].y) ** 2;
+    const a = model[i]!;
+    const b = target[i]!;
+    const px = scale * (cos * a.x - sin * a.y) + tx;
+    const py = scale * (sin * a.x + cos * a.y) + ty;
+    residual += (px - b.x) ** 2 + (py - b.y) ** 2;
   }
   return { scale, angle, tx, ty, residual };
 }
 
-function evaluate(yaw, pitch, target, proportions) {
+function evaluate(
+  yaw: number,
+  pitch: number,
+  target: readonly Point2[],
+  proportions: Partial<Proportions>
+): Candidate | null {
   const model = projectLandmarks(yaw, pitch, 0, proportions);
   const fit = procrustes(model, target);
   return fit ? { ...fit, yaw, pitch } : null;
 }
 
 /** Coarse-to-fine search over orientation. */
-function searchOrientation(target, proportions) {
-  let best = null;
-  const consider = (yaw, pitch) => {
+function searchOrientation(target: readonly Point2[], proportions: Partial<Proportions>): Candidate | null {
+  // Declared without a value, which is undefined: an initial `null` would be
+  // narrowed to null for good, since the checker does not see `consider`
+  // assign it.
+  let best: Candidate | undefined;
+  const consider = (yaw: number, pitch: number) => {
     const candidate = evaluate(yaw, pitch, target, proportions);
     if (candidate && (!best || candidate.residual < best.residual)) best = candidate;
   };
@@ -113,7 +150,11 @@ function searchOrientation(target, proportions) {
  * Returns a transform in the same shape the renderer takes
  * ({ yaw, pitch, roll, x, y, scale }), or null if the taps are degenerate.
  */
-export function solveHeadFromTaps(taps, view, proportions = DEFAULT_PROPORTIONS) {
+export function solveHeadFromTaps(
+  taps: readonly Point2[] | null | undefined,
+  view: { width: number; height: number },
+  proportions: Partial<Proportions> = DEFAULT_PROPORTIONS
+): HeadTransform | null {
   if (!taps || taps.length !== 3) return null;
 
   // Work in the model's frame — x right, y up — so the recovered in-plane
@@ -138,9 +179,9 @@ export function solveHeadFromTaps(taps, view, proportions = DEFAULT_PROPORTIONS)
   };
 }
 
-const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
-function normalizeAngle(deg) {
+function normalizeAngle(deg: number) {
   let d = deg;
   while (d > 180) d -= 360;
   while (d < -180) d += 360;
@@ -148,7 +189,7 @@ function normalizeAngle(deg) {
 }
 
 /** Prompts shown while collecting the three taps, in order. */
-export const FIT_STEPS = [
+export const FIT_STEPS: readonly { key: string; prompt: string }[] = [
   { key: 'chin', prompt: 'Tap the bottom of the chin' },
   { key: 'nose', prompt: 'Tap the base of the nose' },
   { key: 'brow', prompt: 'Tap the brow line, between the eyebrows' },

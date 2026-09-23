@@ -10,14 +10,14 @@ import PaywallScreen from './src/screens/PaywallScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { setHapticsEnabled } from './src/lib/feedback';
 import { useEntitlements } from './src/lib/pro';
-import { resetSettings } from './src/lib/settings';
+import type { Project } from './src/lib/projectShape';
+import { resetSettings, type Settings } from './src/lib/settings';
 import { loadSettings, persistSettings } from './src/lib/settingsStore';
 import { colors } from './src/theme';
 
 export default function App() {
-  // project: null | { id, image: { uri, width, height }, settings }
-  const [project, setProject] = useState(null);
-  const [settings, setSettings] = useState(null); // null while loading
+  const [project, setProject] = useState<Project | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null); // null while loading
   const [replayingIntro, setReplayingIntro] = useState(false);
   const [paywall, setPaywall] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -32,8 +32,11 @@ export default function App() {
     loadSettings().then(setSettings);
   }, []);
 
-  const updateSettings = useCallback((patch) => {
+  // Only what renders once the settings are in can call this (the intro and
+  // the Settings modal), so `prev` is always the loaded record.
+  const updateSettings = useCallback((patch: Partial<Settings>) => {
     setSettings((prev) => {
+      if (prev === null) return prev;
       const next = { ...prev, ...patch };
       persistSettings(next).catch(() => {});
       return next;
@@ -51,7 +54,7 @@ export default function App() {
   // bring the intro back on the next launch.
   const finishOnboarding = () => {
     setReplayingIntro(false);
-    if (!settings.seenIntro) updateSettings({ seenIntro: true });
+    if (settings && !settings.seenIntro) updateSettings({ seenIntro: true });
   };
 
   return (

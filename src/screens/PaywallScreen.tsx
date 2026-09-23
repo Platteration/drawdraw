@@ -3,11 +3,12 @@ import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
-import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
+import { errorCode, errorText } from '../lib/errors';
+import { buildHeadWireframe, HEAD_HEIGHT_UNITS, type ElementSet, type Polyline } from '../lib/headModel';
 import { FREE_FEATURES, PRO_FEATURES } from '../lib/pro';
-import { PRODUCTS, purchases } from '../lib/purchases';
+import { PRODUCTS, purchases, type Product } from '../lib/purchases';
 
-const ALL_ELEMENTS = {
+const ALL_ELEMENTS: ElementSet = {
   center: true,
   eyeLine: true,
   sidePlanes: true,
@@ -18,10 +19,10 @@ const ALL_ELEMENTS = {
   fifths: true,
 };
 
-function FullHead({ size = 150 }) {
+function FullHead({ size = 150 }: { size?: number }) {
   const wire = buildHeadWireframe(35, 6, 0, { elements: ALL_ELEMENTS });
   const ppu = (size * 0.82) / HEAD_HEIGHT_UNITS;
-  const toPath = ({ points, closed }) =>
+  const toPath = ({ points, closed }: Polyline) =>
     points
       .map(
         (p, i) =>
@@ -49,13 +50,19 @@ function FullHead({ size = 150 }) {
   );
 }
 
-export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
+export interface PaywallScreenProps {
+  onClose: () => void;
+  onPurchase: (productId: string) => Promise<unknown>;
+  onRestore: () => Promise<unknown>;
+}
+
+export default function PaywallScreen({ onClose, onPurchase, onRestore }: PaywallScreenProps) {
   const [busy, setBusy] = useState(false);
   // The listing is the app's own copy; the product is the provider's, and its
   // price is the only one shown. Reading PRODUCTS.pro.price here put "$7.99"
   // on the public web build, whose provider cannot sell anything.
   const listing = PRODUCTS.pro;
-  const [product, setProduct] = useState(null);
+  const [product, setProduct] = useState<Product | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -70,17 +77,14 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
     };
   }, [listing.id]);
 
-  const run = async (action, label) => {
+  const run = async (action: () => Promise<unknown>, label: string) => {
     if (busy) return;
     setBusy(true);
     try {
       await action();
       onClose();
     } catch (err) {
-      Alert.alert(
-        err?.code === 'not_configured' ? 'Not available yet' : `${label} failed`,
-        String(err?.message ?? err)
-      );
+      Alert.alert(errorCode(err) === 'not_configured' ? 'Not available yet' : `${label} failed`, errorText(err));
     } finally {
       setBusy(false);
     }

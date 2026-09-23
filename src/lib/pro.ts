@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { purchases } from './purchases';
-import { cleanEntitlements, KEYS } from './settings';
+import { purchases, type PurchaseResult } from './purchases';
+import { cleanEntitlements, KEYS, type Entitlements } from './settings';
 
 const KEY = KEYS.entitlements;
 
@@ -25,7 +25,7 @@ export const FREE_FEATURES = [
   'No watermark, no ads, ever',
 ];
 
-async function read() {
+async function read(): Promise<Entitlements> {
   try {
     const raw = await AsyncStorage.getItem(KEY);
     // Cleaned on the way in: `grant` writes this record back, so anything a
@@ -36,14 +36,14 @@ async function read() {
   }
 }
 
-async function write(entitlements) {
+async function write(entitlements: Entitlements): Promise<void> {
   await AsyncStorage.setItem(KEY, JSON.stringify(entitlements));
 }
 
 /**
  * Entitlement state. `pro` gates the paid surface; `purchase` and `restore`
  * go through the store provider and grant only on a result that says the
- * entitlement was actually acquired — see src/lib/purchases.js for the
+ * entitlement was actually acquired — see src/lib/purchases.ts for the
  * contract a real provider has to meet.
  *
  * `ready` is how a caller tells "not Pro" from "not read yet": `pro` starts
@@ -51,7 +51,14 @@ async function write(entitlements) {
  * that gates on `pro` has to wait for this or it shows a paying customer the
  * free build for a frame.
  */
-export function useEntitlements() {
+export interface EntitlementState {
+  pro: boolean;
+  ready: boolean;
+  purchase: (productId: string) => Promise<PurchaseResult | null | undefined>;
+  restore: () => Promise<PurchaseResult | null | undefined>;
+}
+
+export function useEntitlements(): EntitlementState {
   const [pro, setPro] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -70,7 +77,7 @@ export function useEntitlements() {
   }, []);
 
   const purchase = useCallback(
-    async (productId) => {
+    async (productId: string) => {
       const result = await purchases.purchase(productId);
       // A resolved promise is not a sale. Store SDKs routinely resolve with
       // `userCancelled`, or with a deferred/pending transaction, rather than

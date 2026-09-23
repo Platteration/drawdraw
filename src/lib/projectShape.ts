@@ -24,24 +24,61 @@ import {
   ELEMENTS,
   HEAD_OFFSET_RANGE,
   PROPORTION_RANGES,
+  type ElementSet,
+  type HeadTransform,
+  type Proportions,
+  type Range,
 } from './headModel';
 import { GUIDE_COLORS, LINE_WEIGHT_RANGE, TRACING_OPACITY_RANGE } from '../theme';
 
+/** The editor's setup for one portrait, as saved; a field left out takes the editor's own default. */
+export interface ProjectSettings {
+  showHead?: boolean;
+  headTransform?: HeadTransform;
+  elements?: ElementSet;
+  proportions?: Proportions;
+  hGuides?: number[];
+  vGuides?: number[];
+  showHorizontal?: boolean;
+  showVertical?: boolean;
+  showCenter?: boolean;
+  guideColor?: string;
+  lineWeight?: number;
+  tracingOpacity?: number;
+}
+
+export interface ProjectImage {
+  uri: string;
+  width: number;
+  height: number;
+}
+
+/** One record of the project index. */
+export interface Project {
+  id: string;
+  updatedAt: number;
+  image: ProjectImage;
+  settings: ProjectSettings | null;
+}
+
 const ELEMENT_KEYS = ELEMENTS.map((el) => el.key);
-const PROPORTION_KEYS = Object.keys(DEFAULT_PROPORTIONS);
+/** Every key DEFAULT_PROPORTIONS has, which is what a proportion is. */
+const isProportionKey = (key: string): key is keyof Proportions =>
+  Object.prototype.hasOwnProperty.call(DEFAULT_PROPORTIONS, key);
+const PROPORTION_KEYS = Object.keys(DEFAULT_PROPORTIONS).filter(isProportionKey);
 const COLOR_VALUES = GUIDE_COLORS.map((c) => c.value);
 
 /**
  * A pose is six numbers, and being a number is not enough: `scale: 1e308` is
- * finite, and `scale * height` in HeadGuide (:38) is then Infinity; `yaw:
+ * finite, and `scale * height` in HeadGuide.tsx:60 is then Infinity; `yaw:
  * 1e308` is finite, and `deg * Math.PI` in the model's degrees-to-radians
- * (headModel.js:100) overflows before the divide, so every projected point
+ * (headModel.ts:216) overflows before the divide, so every projected point
  * comes back NaN. Either fills the path data with `NaN`, which is the failure
  * this module exists to stop — react-native-svg's PathParser throws on it.
  *
  * So each value is held to the range the code that writes it keeps. Scale is
- * clamped to [0.1, 3] by the pinch gesture (HeadGestureLayer.js) and to
- * [0.05, 4] by the three-tap solver (fitSolver.js), so the solver's is the
+ * clamped to [0.1, 3] by the pinch gesture (HeadGestureLayer.tsx) and to
+ * [0.05, 4] by the three-tap solver (fitSolver.ts), so the solver's is the
  * wider of the two. Pitch is clamped to +/-90 by both. x and y are positions,
  * and no geometry bounds them — a fit on a very elongated photo really does
  * solve a centre several view-widths outside the view, with the head still
@@ -53,7 +90,7 @@ const COLOR_VALUES = GUIDE_COLORS.map((c) => c.value);
  * where the conversion above stays finite.
  */
 const MAX_SCALE = 4;
-const TRANSFORM_RANGES = {
+const TRANSFORM_RANGES: Record<keyof HeadTransform, Range> = {
   yaw: [-36000, 36000],
   pitch: [-90, 90],
   roll: [-36000, 36000],
@@ -61,7 +98,6 @@ const TRANSFORM_RANGES = {
   y: HEAD_OFFSET_RANGE,
   scale: [0.05, MAX_SCALE],
 };
-const TRANSFORM_KEYS = Object.keys(TRANSFORM_RANGES);
 
 /**
  * The editor writes two guides of each orientation and never adds one, so a
@@ -70,33 +106,54 @@ const TRANSFORM_KEYS = Object.keys(TRANSFORM_RANGES);
  */
 const MAX_GUIDES = 16;
 
-const isObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
-const isFinite_ = (v) => typeof v === 'number' && Number.isFinite(v);
-const isNonEmptyString = (v) => typeof v === 'string' && v.length > 0;
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+const isFinite_ = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 /**
  * A range is `[lo, hi]`, and a key that has none is not in range. Destructuring
  * the second argument instead would throw a TypeError for a missing table
- * entry, which listProjects' `catch { return [] }` (storage.js) turns into an
+ * entry, which listProjects' `catch { return [] }` (storage.ts) turns into an
  * empty library that the next write makes permanent — the one failure this
  * module exists to absorb, reached by the most ordinary schema change there is
- * (a new proportion added to DEFAULT_PROPORTIONS before its range).
+ * (a new proportion added to DEFAULT_PROPORTIONS before its range). The
+ * checker now refuses that change, since PROPORTION_RANGES is a Record over
+ * every proportion; the guard is what holds when a table ships wrong anyway.
  */
-const inRange = (v, range) =>
+const inRange = (v: unknown, range: Range | undefined): v is number =>
   Array.isArray(range) && isFinite_(v) && v >= range[0] && v <= range[1];
 
 /** Copy `key` from `from` to `into` only when `ok(value)` holds. */
-function keep(into, from, key, ok) {
+function keep<K extends keyof ProjectSettings>(
+  into: ProjectSettings,
+  from: Record<string, unknown>,
+  key: K,
+  ok: (value: unknown) => value is ProjectSettings[K]
+): void {
   const value = from[key];
   if (ok(value)) into[key] = value;
 }
 
-/** A head pose is all-or-nothing: a partial one produces NaN geometry. */
-function sanitizeHeadTransform(raw) {
+/**
+ * A head pose is all-or-nothing: a partial one produces NaN geometry. Every
+ * key is checked against its own range, and the pose comes back only when all
+ * six hold, spelled out so that a seventh field cannot be left unchecked.
+ */
+function sanitizeHeadTransform(raw: unknown): HeadTransform | undefined {
   if (!isObject(raw)) return undefined;
-  for (const key of TRANSFORM_KEYS) if (!inRange(raw[key], TRANSFORM_RANGES[key])) return undefined;
-  const out = {};
-  for (const key of TRANSFORM_KEYS) out[key] = raw[key];
-  return out;
+  const { yaw, pitch, roll, x, y, scale } = raw;
+  const R = TRANSFORM_RANGES;
+  if (
+    !inRange(yaw, R.yaw) ||
+    !inRange(pitch, R.pitch) ||
+    !inRange(roll, R.roll) ||
+    !inRange(x, R.x) ||
+    !inRange(y, R.y) ||
+    !inRange(scale, R.scale)
+  ) {
+    return undefined;
+  }
+  return { yaw, pitch, roll, x, y, scale };
 }
 
 /**
@@ -106,13 +163,14 @@ function sanitizeHeadTransform(raw) {
  * `width: 0` is finite and collapses the ellipsoid's semi-axis to zero, which
  * the ear and jaw curves then divide by.
  */
-function sanitizeProportions(raw) {
+function sanitizeProportions(raw: unknown): Proportions | undefined {
   if (!isObject(raw)) return undefined;
   const out = { ...DEFAULT_PROPORTIONS };
   let sawOne = false;
   for (const key of PROPORTION_KEYS) {
-    if (inRange(raw[key], PROPORTION_RANGES[key])) {
-      out[key] = raw[key];
+    const value = raw[key];
+    if (inRange(value, PROPORTION_RANGES[key])) {
+      out[key] = value;
       sawOne = true;
     }
   }
@@ -124,26 +182,27 @@ function sanitizeProportions(raw) {
  * ever removes keys. Merging the defaults back in would hand a free user the
  * Pro construction lines.
  */
-function sanitizeElements(raw) {
+function sanitizeElements(raw: unknown): ElementSet | undefined {
   if (!isObject(raw)) return undefined;
-  const out = {};
+  const out: ElementSet = {};
   for (const key of ELEMENT_KEYS) if (raw[key] === true) out[key] = true;
   return out;
 }
 
 /** Guide positions are fractions of the image; anything else is not one. */
-function sanitizeFractions(raw) {
+function sanitizeFractions(raw: unknown): number[] | undefined {
   if (!Array.isArray(raw) || raw.length > MAX_GUIDES) return undefined;
-  return raw.every((v) => inRange(v, [0, 1])) ? raw.slice() : undefined;
+  const list: unknown[] = raw;
+  return list.every((v): v is number => inRange(v, [0, 1])) ? list.slice() : undefined;
 }
 
 /**
  * Editor settings as stored. Returns `null` for the legitimately empty case —
  * `createProject` writes `settings: null` for every fresh import.
  */
-export function sanitizeSettings(raw) {
+export function sanitizeSettings(raw: unknown): ProjectSettings | null {
   if (!isObject(raw)) return null;
-  const out = {};
+  const out: ProjectSettings = {};
 
   const transform = sanitizeHeadTransform(raw.headTransform);
   if (transform) out.headTransform = transform;
@@ -156,17 +215,24 @@ export function sanitizeSettings(raw) {
   const vGuides = sanitizeFractions(raw.vGuides);
   if (vGuides) out.vGuides = vGuides;
 
-  const isBool = (v) => typeof v === 'boolean';
-  for (const key of ['showHead', 'showHorizontal', 'showVertical', 'showCenter']) {
+  const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
+  const flags: readonly ('showHead' | 'showHorizontal' | 'showVertical' | 'showCenter')[] = [
+    'showHead',
+    'showHorizontal',
+    'showVertical',
+    'showCenter',
+  ];
+  for (const key of flags) {
     keep(out, raw, key, isBool);
   }
-  keep(out, raw, 'guideColor', (v) => COLOR_VALUES.includes(v));
+  // Every value in the list is a string, so nothing else can be one of them.
+  keep(out, raw, 'guideColor', (v): v is string => typeof v === 'string' && COLOR_VALUES.includes(v));
   // Both are slider values, and both are held to their own slider's range for
   // the same reason the pose is: `lineWeight: 1.7e308` is finite and positive,
   // and HeadGuide's depth taper multiplies it into Infinity, which neither
   // renderer rejects and neither draws.
-  keep(out, raw, 'lineWeight', (v) => inRange(v, LINE_WEIGHT_RANGE));
-  keep(out, raw, 'tracingOpacity', (v) => inRange(v, TRACING_OPACITY_RANGE));
+  keep(out, raw, 'lineWeight', (v): v is number => inRange(v, LINE_WEIGHT_RANGE));
+  keep(out, raw, 'tracingOpacity', (v): v is number => inRange(v, TRACING_OPACITY_RANGE));
 
   return out;
 }
@@ -177,12 +243,12 @@ export function sanitizeSettings(raw) {
  * (`%` with nothing after it) counts as one: it is not something this app
  * wrote, and what a native URI parser does with it is not worth finding out.
  *
- * Exported because the deletion guard in storage.js needs the same test — a
+ * Exported because the deletion guard in storage.ts needs the same test — a
  * prefix check alone is satisfied by a path that then climbs back out of the
  * directory the prefix names.
  */
-export function hasTraversal(uri) {
-  let decoded;
+export function hasTraversal(uri: string): boolean {
+  let decoded: string;
   try {
     decoded = decodeURIComponent(uri);
   } catch {
@@ -193,8 +259,8 @@ export function hasTraversal(uri) {
 
 /**
  * The only URI `createProject` ever indexes is a `file://` path to the app's
- * own copy (storage.js:69), and `removePortrait` already holds a deletion to
- * that same directory (:35) — so reading was laxer than writing, and the gap
+ * own copy (storage.ts:94), and `removePortrait` already holds a deletion to
+ * that same directory (:55) — so reading was laxer than writing, and the gap
  * was a live one rather than a stale-record one: the home screen renders
  * `image.uri` straight into `<Image source={{ uri }}>` on every paint, so an
  * `https:` URI in the index makes an app that has no network code of its own
@@ -208,17 +274,17 @@ export function hasTraversal(uri) {
  * fires that without anyone asking for a deletion at all. And an authority is
  * a host, not a local file: `file://attacker.example/x.png` is no more ours
  * than `https:` is. Both are refused here. The directory half of the invariant
- * stays in storage.js, which is the module that knows where documentDirectory
+ * stays in storage.ts, which is the module that knows where documentDirectory
  * is; this one is pure on purpose.
  */
-const isLocalFileUri = (v) =>
+const isLocalFileUri = (v: unknown): v is string =>
   isNonEmptyString(v) && v.startsWith('file:///') && !hasTraversal(v);
 
 /**
  * One record from the project index, or `null` if it cannot be opened at all.
  * A project is only useful with an image to draw over, so that is the bar.
  */
-export function sanitizeProject(raw) {
+export function sanitizeProject(raw: unknown): Project | null {
   if (!isObject(raw)) return null;
   if (!isNonEmptyString(raw.id)) return null;
   const image = raw.image;
@@ -235,10 +301,11 @@ export function sanitizeProject(raw) {
 }
 
 /** The stored index, with anything unopenable left out. */
-export function sanitizeProjects(raw) {
+export function sanitizeProjects(raw: unknown): Project[] {
   if (!Array.isArray(raw)) return [];
-  const out = [];
-  for (const entry of raw) {
+  const entries: unknown[] = raw;
+  const out: Project[] = [];
+  for (const entry of entries) {
     const project = sanitizeProject(entry);
     if (project) out.push(project);
   }

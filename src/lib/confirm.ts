@@ -8,7 +8,15 @@ import { Alert, Platform } from 'react-native';
  * Two buttons, cancel first as the safe default, the destructive one named
  * with its verb.
  */
-export function confirmAction({ title, message, cancelLabel, confirmLabel, onConfirm }) {
+export interface Confirmation {
+  title: string;
+  message: string;
+  cancelLabel: string;
+  confirmLabel: string;
+  onConfirm: () => void;
+}
+
+export function confirmAction({ title, message, cancelLabel, confirmLabel, onConfirm }: Confirmation): void {
   if (Platform.OS === 'web') {
     if (typeof window !== 'undefined' && window.confirm(`${title}\n\n${message}`)) onConfirm();
     return;

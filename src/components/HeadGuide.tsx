@@ -2,7 +2,17 @@ import React, { useMemo } from 'react';
 import { StyleSheet } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
-import { buildHeadWireframe, DRAFT_SAMPLES, HEAD_HEIGHT_UNITS, MAX_RADIUS } from '../lib/headModel';
+import {
+  buildHeadWireframe,
+  DRAFT_SAMPLES,
+  HEAD_HEIGHT_UNITS,
+  MAX_RADIUS,
+  type ElementSet,
+  type HeadTransform,
+  type Polyline,
+  type ProjectedPoint,
+  type Proportions,
+} from '../lib/headModel';
 
 const DEPTH_BUCKETS = 4; // depth-tapered stroke width, quantized for performance
 
@@ -14,6 +24,18 @@ const DEPTH_BUCKETS = 4; // depth-tapered stroke width, quantized for performanc
  * transform: { yaw, pitch, roll (degrees), x, y (fractions of the view),
  *              scale (head height as a fraction of the view height) }
  */
+export interface HeadGuideProps {
+  width: number;
+  height: number;
+  transform: HeadTransform;
+  color: string;
+  thickness: number;
+  taper?: boolean;
+  elements?: ElementSet;
+  proportions?: Partial<Proportions>;
+  draft?: boolean;
+}
+
 export default function HeadGuide({
   width,
   height,
@@ -24,7 +46,7 @@ export default function HeadGuide({
   elements,
   proportions,
   draft = false,
-}) {
+}: HeadGuideProps) {
   const { yaw, pitch, roll, x, y, scale } = transform;
   // While the head is being dragged, sample the curves more coarsely and skip
   // the depth-taper split: both multiply how many <Path> nodes cross to native
@@ -39,26 +61,29 @@ export default function HeadGuide({
   const cx = x * width;
   const cy = y * height;
 
-  const sx = (p) => (cx + p.x * ppu).toFixed(2);
-  const sy = (p) => (cy - p.y * ppu).toFixed(2);
+  const sx = (p: ProjectedPoint) => (cx + p.x * ppu).toFixed(2);
+  const sy = (p: ProjectedPoint) => (cy - p.y * ppu).toFixed(2);
 
-  const toPath = (points, closed) => {
+  const toPath = (points: ProjectedPoint[], closed: boolean) => {
     let d = '';
-    for (let i = 0; i < points.length; i++) d += `${i === 0 ? 'M' : 'L'}${sx(points[i])} ${sy(points[i])}`;
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i]!; // i < points.length
+      d += `${i === 0 ? 'M' : 'L'}${sx(p)} ${sy(p)}`;
+    }
     return closed ? `${d}Z` : d;
   };
 
   // Near strokes read heavier than far ones, the way a construction drawing
   // is weighted. Points are grouped into a few depth buckets so each polyline
   // still renders as a handful of paths rather than one per segment.
-  const bucketOf = (p) => {
+  const bucketOf = (p: ProjectedPoint) => {
     const t = (p.z / MAX_RADIUS + 1) / 2; // 0 = far, 1 = near
     return Math.max(0, Math.min(DEPTH_BUCKETS - 1, Math.floor(t * DEPTH_BUCKETS)));
   };
-  const widthOf = (bucket) =>
+  const widthOf = (bucket: number) =>
     thickness * (0.7 + (0.55 * bucket) / Math.max(1, DEPTH_BUCKETS - 1));
 
-  const renderPoly = (poly, key, { opacity, dash }) => {
+  const renderPoly = (poly: Polyline, key: string, { opacity, dash }: { opacity: number; dash?: string }) => {
     if (!taper || draft) {
       return (
         <Path
@@ -74,17 +99,21 @@ export default function HeadGuide({
       );
     }
     // Split into runs of equal depth bucket, repeating the boundary point so
-    // consecutive runs stay visually joined.
-    const pts = poly.closed ? [...poly.points, poly.points[0]] : poly.points;
-    const out = [];
-    let run = [pts[0]];
-    let bucket = bucketOf(pts[0]);
+    // consecutive runs stay visually joined. A polyline with no points has
+    // none to draw; the wireframe never holds one.
+    const first = poly.points[0];
+    if (!first) return [];
+    const pts = poly.closed ? [...poly.points, first] : poly.points;
+    const out: { points: ProjectedPoint[]; bucket: number }[] = [];
+    let run = [first];
+    let bucket = bucketOf(first);
     for (let i = 1; i < pts.length; i++) {
-      const b = bucketOf(pts[i]);
-      run.push(pts[i]);
+      const p = pts[i]!; // i < pts.length
+      const b = bucketOf(p);
+      run.push(p);
       if (b !== bucket) {
         out.push({ points: run, bucket });
-        run = [pts[i]];
+        run = [p];
         bucket = b;
       }
     }
