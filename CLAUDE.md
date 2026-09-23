@@ -9,13 +9,19 @@ See README.md for what it does and how the pose fit works.
 ```bash
 npm install
 npx expo start          # run on a device via Expo Go
-npm run check           # the gate before a push: lint, unit tests, conventions test
+npm run check           # the gate before a push: lint, type check, unit tests, conventions test
 npm run lint            # eslint, the shared Expo configuration
+npm run typecheck       # tsc --noEmit: strict, with noUncheckedIndexedAccess
 npm test                # jest, via the jest-expo preset
 npm run icons           # regenerate assets/ from the head model
 npm run test:e2e        # build for web and drive the app in a browser
 npx expo export --platform ios --platform android --output-dir .export-check
 ```
+
+`tsconfig.json` extends `expo/tsconfig.base` the way the sibling apps' do, and
+lists the `jest` and `node` types because the tests read the file system;
+`@types/node` is a devDependency for that reason only, pinned to the Node 22
+line CI runs.
 
 `npx expo export` is the fastest way to confirm a change still compiles for both
 platforms. `npm run test:e2e` is how to confirm it actually *runs*: there is no
