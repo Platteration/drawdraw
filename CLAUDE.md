@@ -61,8 +61,11 @@ before pushing.
   `expo-file-system/legacy` and `expo-media-library/legacy`: since SDK 54 and 56
   the package roots are object APIs whose functions of the old names are stubs
   that throw. The unit suites mock native modules wholesale, so
-  `__tests__/nativeApi.test.ts` checks every name the app calls on a mocked
-  module against the installed package's own type declarations.
+  `__tests__/nativeApi.test.ts` checks every name the app imports from a mocked
+  module, or reads off its namespace or default export as `X.name`
+  (`AsyncStorage.getItem`, `Constants.expoConfig`), against the installed
+  package's own type declarations; a default export's members are read through
+  the TypeScript checker, which follows the type the export names.
 - `src/lib/projectShape.ts` — checks what comes back out of storage, and
   defines the shapes it checks (`Project`, `ProjectSettings`). Anything
   that does not hold up is dropped so the caller's own default applies; it
