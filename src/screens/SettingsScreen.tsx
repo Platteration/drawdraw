@@ -10,7 +10,7 @@ import type { Settings } from '../lib/settings';
  * The one URL the app hands to the operating system. `Linking.openURL` opens
  * it in the browser, a separate process with its own permissions; this app
  * still opens no socket and ships no INTERNET permission, and
- * __tests__/appConfig.test.js pins it to this single call.
+ * __tests__/appConfig.test.ts pins it to this single call.
  */
 export const SOURCE_URL = 'https://github.com/Platteration/drawdraw';
 
@@ -20,7 +20,7 @@ export const APP_VERSION = Constants.expoConfig?.version ?? '0.0.0';
 /**
  * Three rows: the one preference the app has, a way back to the defaults, and
  * what this is. There is no theme row on purpose — the app has one palette
- * (src/theme.ts), and __tests__/appearance.test.js pins the native config to
+ * (src/theme.ts), and __tests__/appearance.test.ts pins the native config to
  * it.
  */
 export interface SettingsScreenProps {

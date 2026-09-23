@@ -12,34 +12,40 @@ jest.mock('../purchases', () => ({
 }));
 
 import React, { useEffect } from 'react';
-import renderer, { act } from 'react-test-renderer';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { purchases } from '../purchases';
-import { useEntitlements } from '../pro';
+import { useEntitlements, type EntitlementState } from '../pro';
 
-let entitlements;
-const capture = (value) => {
+let entitlements: EntitlementState | undefined;
+const capture = (value: EntitlementState) => {
   entitlements = value;
+};
+/** The hook's value as of the latest render; there has to have been one. */
+const current = (): EntitlementState => {
+  if (!entitlements) throw new Error('the hook has not rendered');
+  return entitlements;
 };
 /**
  * Hands the hook's value out from an effect, so nothing outside a component
  * is written during render (react-hooks/globals); `act` flushes effects, so
  * every read below still sees the value of the latest render.
  */
-function Probe({ onValue }) {
+function Probe({ onValue }: { onValue: (value: EntitlementState) => void }) {
   const value = useEntitlements();
   useEffect(() => onValue(value), [value, onValue]);
   return null;
 }
 
-let trees = [];
+let trees: ReactTestRenderer[] = [];
 
 async function mount() {
-  let tree;
+  let tree: ReactTestRenderer | undefined;
   await act(async () => {
     tree = renderer.create(<Probe onValue={capture} />);
   });
+  if (!tree) throw new Error('nothing was rendered');
   trees.push(tree);
   return tree;
 }
@@ -48,7 +54,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   entitlements = undefined;
   trees = [];
-  AsyncStorage.getItem.mockResolvedValue(null);
+  jest.mocked(AsyncStorage.getItem).mockResolvedValue(null);
 });
 
 afterEach(async () => {
@@ -62,23 +68,23 @@ describe('purchase', () => {
     // on resolution alone gives Pro away to anyone who opens the sheet and
     // changes their mind.
     for (const result of [{ userCancelled: true }, { pending: true }, {}, undefined, null]) {
-      purchases.purchase.mockResolvedValueOnce(result);
+      jest.mocked(purchases.purchase).mockResolvedValueOnce(result);
       await mount();
       await act(async () => {
-        await entitlements.purchase('com.platteration.drawdraw.pro');
+        await current().purchase('com.platteration.drawdraw.pro');
       });
-      expect(entitlements.pro).toBe(false);
+      expect(current().pro).toBe(false);
       expect(AsyncStorage.setItem).not.toHaveBeenCalled();
     }
   });
 
   it('unlocks Pro on a result that says the entitlement was acquired', async () => {
-    purchases.purchase.mockResolvedValue({ pro: true, productId: 'x' });
+    jest.mocked(purchases.purchase).mockResolvedValue({ pro: true, productId: 'x' });
     await mount();
     await act(async () => {
-      await entitlements.purchase('com.platteration.drawdraw.pro');
+      await current().purchase('com.platteration.drawdraw.pro');
     });
-    expect(entitlements.pro).toBe(true);
+    expect(current().pro).toBe(true);
     expect(AsyncStorage.setItem).toHaveBeenCalledWith(
       'drawdraw.entitlements.v1',
       JSON.stringify({ pro: true })
@@ -87,26 +93,26 @@ describe('purchase', () => {
 
   it('reads the same rule as restore', async () => {
     // The two used to disagree: restore checked result.pro, purchase did not.
-    purchases.restore.mockResolvedValue({ pro: false });
+    jest.mocked(purchases.restore).mockResolvedValue({ pro: false });
     await mount();
     await act(async () => {
-      await entitlements.restore();
+      await current().restore();
     });
-    expect(entitlements.pro).toBe(false);
+    expect(current().pro).toBe(false);
 
-    purchases.restore.mockResolvedValue({ pro: true });
+    jest.mocked(purchases.restore).mockResolvedValue({ pro: true });
     await act(async () => {
-      await entitlements.restore();
+      await current().restore();
     });
-    expect(entitlements.pro).toBe(true);
+    expect(current().pro).toBe(true);
   });
 
   it('lets a store error through to the paywall', async () => {
     const error = new Error('In-app purchases are not configured in this build.');
-    purchases.purchase.mockRejectedValue(error);
+    jest.mocked(purchases.purchase).mockRejectedValue(error);
     await mount();
-    await expect(entitlements.purchase('x')).rejects.toThrow(error.message);
-    expect(entitlements.pro).toBe(false);
+    await expect(current().purchase('x')).rejects.toThrow(error.message);
+    expect(current().pro).toBe(false);
   });
 });
 
@@ -116,24 +122,24 @@ describe('the stored record', () => {
     // localStorage on the web build, and a truthiness check here would take
     // any of these as a purchase.
     for (const raw of ['{"pro":1}', '{"pro":"true"}', '{"pro":"constructor"}', '{"__proto__":{"pro":true}}', '"pro"']) {
-      AsyncStorage.getItem.mockResolvedValue(raw);
+      jest.mocked(AsyncStorage.getItem).mockResolvedValue(raw);
       await mount();
-      expect(entitlements.ready).toBe(true);
-      expect(entitlements.pro).toBe(false);
+      expect(current().ready).toBe(true);
+      expect(current().pro).toBe(false);
     }
-    AsyncStorage.getItem.mockResolvedValue('{"pro":true}');
+    jest.mocked(AsyncStorage.getItem).mockResolvedValue('{"pro":true}');
     await mount();
-    expect(entitlements.pro).toBe(true);
+    expect(current().pro).toBe(true);
   });
 
   it('writes back the flag alone, not whatever the stored record carried', async () => {
     // `grant` spreads the record it read; read raw, a stored extra field would
     // be persisted for good on the first purchase.
-    AsyncStorage.getItem.mockResolvedValue('{"pro":false,"receipt":"x","__proto__":{"y":1}}');
-    purchases.purchase.mockResolvedValue({ pro: true });
+    jest.mocked(AsyncStorage.getItem).mockResolvedValue('{"pro":false,"receipt":"x","__proto__":{"y":1}}');
+    jest.mocked(purchases.purchase).mockResolvedValue({ pro: true });
     await mount();
     await act(async () => {
-      await entitlements.purchase('com.platteration.drawdraw.pro');
+      await current().purchase('com.platteration.drawdraw.pro');
     });
     expect(AsyncStorage.setItem).toHaveBeenCalledWith('drawdraw.entitlements.v1', JSON.stringify({ pro: true }));
   });
@@ -143,27 +149,27 @@ describe('ready', () => {
   it('stays false until the stored entitlement has actually been read', async () => {
     // `pro` starts false, so a caller that renders before this is true shows
     // a paying customer the free build.
-    let resolveRead;
-    AsyncStorage.getItem.mockReturnValue(
-      new Promise((resolve) => {
+    let resolveRead: (raw: string | null) => void = () => {};
+    jest.mocked(AsyncStorage.getItem).mockReturnValue(
+      new Promise<string | null>((resolve) => {
         resolveRead = resolve;
       })
     );
 
     await mount();
-    expect(entitlements.ready).toBe(false);
-    expect(entitlements.pro).toBe(false);
+    expect(current().ready).toBe(false);
+    expect(current().pro).toBe(false);
 
     await act(async () => resolveRead(JSON.stringify({ pro: true })));
-    expect(entitlements.ready).toBe(true);
-    expect(entitlements.pro).toBe(true);
+    expect(current().ready).toBe(true);
+    expect(current().pro).toBe(true);
   });
 
   it('settles even when storage is unreadable', async () => {
     // Holding the first frame on this flag means it must never hang.
-    AsyncStorage.getItem.mockRejectedValue(new Error('storage unavailable'));
+    jest.mocked(AsyncStorage.getItem).mockRejectedValue(new Error('storage unavailable'));
     await mount();
-    expect(entitlements.ready).toBe(true);
-    expect(entitlements.pro).toBe(false);
+    expect(current().ready).toBe(true);
+    expect(current().pro).toBe(false);
   });
 });

@@ -5,7 +5,7 @@
  * reachable from the web e2e, so it is driven here through the real component.
  */
 import React from 'react';
-import renderer, { act } from 'react-test-renderer';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { ActivityIndicator, Alert, BackHandler, PixelRatio, Platform, StyleSheet } from 'react-native';
 
 jest.mock('react-native-view-shot', () => ({
@@ -31,14 +31,26 @@ import { captureRef, releaseCapture } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { saveSettings } from '../../lib/storage';
 import HeadGuide from '../../components/HeadGuide';
+import type { ProjectImage } from '../../lib/projectShape';
 import EditorScreen from '../EditorScreen';
 
 const MAX_EXPORT_DIMENSION = 4096; // EditorScreen's own cap
 const PHOTO = { uri: 'file:///portrait.jpg', width: 4032, height: 3024 }; // a 12MP phone photo
 
 const realOS = Platform.OS;
-let backHandlers = [];
-let mounted = [];
+/** What Android hands a back handler; the editor's reads none of it. */
+const BACK_PRESS = { type: 'hardwareBackPress', timeStamp: 0 };
+let backHandlers: {
+  event: string;
+  handler: (event: typeof BACK_PRESS) => boolean | null | undefined;
+}[] = [];
+let mounted: ReactTestRenderer[] = [];
+
+/** `value`, which the test needs to be there: a missing one fails the test here, by name. */
+function found<T>(value: T | null | undefined, what: string): T {
+  if (value == null) throw new Error(`${what} is missing`);
+  return value;
+}
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -60,19 +72,28 @@ afterEach(async () => {
 });
 
 /** Mount the editor on a given platform and screen scale, canvas measured. */
-async function mountEditor({ platform = 'ios', pixelRatio = 3, image = PHOTO, pro = true } = {}) {
+async function mountEditor({
+  platform = 'ios',
+  pixelRatio = 3,
+  image = PHOTO,
+  pro = true,
+}: { platform?: typeof Platform.OS; pixelRatio?: number; image?: ProjectImage; pro?: boolean } = {}) {
   Platform.OS = platform;
   jest.spyOn(PixelRatio, 'get').mockReturnValue(pixelRatio);
   const onClose = jest.fn();
-  let tree;
+  let rendered: ReactTestRenderer | undefined;
   await act(async () => {
-    tree = renderer.create(
-      <EditorScreen project={{ id: 'p1', image, settings: {} }} onClose={onClose} pro={pro} />,
+    rendered = renderer.create(
+      <EditorScreen project={{ id: 'p1', updatedAt: 0, image, settings: {} }} onClose={onClose} pro={pro} />,
       { createNodeMock: () => ({}) } // give the off-screen views a ref to capture
     );
   });
+  const tree = found(rendered, 'the rendered editor');
   mounted.push(tree);
-  const area = tree.root.findAll((n) => n.props && typeof n.props.onLayout === 'function')[0];
+  const area = found(
+    tree.root.findAll((n) => n.props && typeof n.props.onLayout === 'function')[0],
+    'the measured canvas area'
+  );
   await act(async () => {
     area.props.onLayout({ nativeEvent: { layout: { width: 400, height: 700 } } });
   });
@@ -80,9 +101,10 @@ async function mountEditor({ platform = 'ios', pixelRatio = 3, image = PHOTO, pr
 }
 
 /** Press a Chip or PrimaryButton by its label, checking it is not disabled. */
-async function press(tree, label) {
-  const [node] = tree.root.findAll((n) => n.props && n.props.label === label);
-  expect(node).toBeDefined();
+async function press(tree: ReactTestRenderer, label: string) {
+  const [first] = tree.root.findAll((n) => n.props && n.props.label === label);
+  expect(first).toBeDefined();
+  const node = found(first, label);
   expect(node.props.disabled).toBeFalsy();
   await act(async () => {
     await node.props.onPress();
@@ -90,12 +112,13 @@ async function press(tree, label) {
 }
 
 /** The pixel size the last capture will actually produce on this platform. */
-function deliveredPixels({ platform, pixelRatio }) {
-  const options = captureRef.mock.calls[captureRef.mock.calls.length - 1][1];
+function deliveredPixels({ platform, pixelRatio }: { platform: string; pixelRatio: number }) {
+  const [, options] = found(jest.mocked(captureRef).mock.calls.at(-1), 'a capture');
   // iOS reads width/height as points and rasterises at the screen scale
   // (a UIGraphicsImageRenderer with format scale 0, in RNViewShot.mm).
   const scale = platform === 'ios' ? pixelRatio : 1;
-  return { width: options.width * scale, height: options.height * scale };
+  // A size that was not passed is NaN here, and fails every comparison made with it.
+  return { width: (options?.width ?? NaN) * scale, height: (options?.height ?? NaN) * scale };
 }
 
 describe('export resolution', () => {
@@ -128,7 +151,7 @@ describe('export resolution', () => {
     await press(tree, 'Photo\n+ guide');
     // Android scales the bitmap to exactly what was asked for, so the
     // conversion must not touch it.
-    expect(captureRef.mock.calls[0][1]).toMatchObject({
+    expect(found(jest.mocked(captureRef).mock.calls[0], 'a capture')[1]).toMatchObject({
       format: 'png',
       quality: 1,
       width: PHOTO.width,
@@ -137,7 +160,7 @@ describe('export resolution', () => {
   });
 
   it('renders the turnaround sheet at the same size on every device', async () => {
-    const sizes = [];
+    const sizes: { width: number; height: number }[] = [];
     for (const pixelRatio of [2, 3]) {
       jest.clearAllMocks();
       const { tree } = await mountEditor({ platform: 'ios', pixelRatio });
@@ -155,23 +178,26 @@ describe('while an export is being captured', () => {
     // child: a band under the export buttons, with the spinner in it, and the
     // editor above it neither dimmed nor covered. The web build still has the
     // name, so only a device ever showed it.
-    let finish;
-    captureRef.mockImplementationOnce(
+    let finish: (uri: string) => void = () => {};
+    jest.mocked(captureRef).mockImplementationOnce(
       () =>
-        new Promise((resolve) => {
+        new Promise<string>((resolve) => {
           finish = resolve;
         })
     );
     const { tree } = await mountEditor();
     expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
 
-    const [button] = tree.root.findAll((n) => n.props && n.props.label === 'Photo\n+ guide');
-    let pressed;
+    const button = found(
+      tree.root.findAll((n) => n.props && n.props.label === 'Photo\n+ guide')[0],
+      'the photo export button'
+    );
+    let pressed: unknown;
     await act(async () => {
       pressed = button.props.onPress(); // held open until the capture resolves
     });
 
-    const overlay = tree.root.findByType(ActivityIndicator).parent;
+    const overlay = found(tree.root.findByType(ActivityIndicator).parent, "the spinner's container");
     expect(StyleSheet.flatten(overlay.props.style)).toMatchObject({
       position: 'absolute',
       top: 0,
@@ -193,10 +219,10 @@ describe('saving to the photo library', () => {
     const { tree } = await mountEditor();
     await press(tree, 'Photo\n+ guide');
 
-    const [, , buttons] = Alert.alert.mock.calls[0];
-    const save = buttons.find((b) => b.text === 'Save to Photos');
+    const [, , buttons = []] = found(jest.mocked(Alert.alert).mock.calls[0], 'the export alert');
+    const save = found(buttons.find((b) => b.text === 'Save to Photos'), 'Save to Photos');
     await act(async () => {
-      await save.onPress();
+      await save.onPress?.();
     });
 
     // The app never reads or enumerates the library, so it must not ask for
@@ -207,15 +233,15 @@ describe('saving to the photo library', () => {
 });
 
 describe('Android hardware back', () => {
-  const latest = () => backHandlers[backHandlers.length - 1];
+  const latest = () => found(backHandlers.at(-1), 'a back handler');
 
   it('leaves the editor instead of closing the app', async () => {
     const { onClose } = await mountEditor({ platform: 'android' });
     expect(latest().event).toBe('hardwareBackPress');
 
-    let handled;
+    let handled: boolean | null | undefined;
     await act(async () => {
-      handled = latest().handler();
+      handled = latest().handler(BACK_PRESS);
     });
     expect(handled).toBe(true); // swallowed, so the activity is not finished
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -225,17 +251,17 @@ describe('Android hardware back', () => {
     const { tree, onClose } = await mountEditor({ platform: 'android' });
     await press(tree, 'Fit to face');
 
-    let handled;
+    let handled: boolean | null | undefined;
     await act(async () => {
-      handled = latest().handler();
+      handled = latest().handler(BACK_PRESS);
     });
     expect(handled).toBe(true);
     expect(onClose).not.toHaveBeenCalled(); // the fit was cancelled, not the editor
-    expect(tree.root.findAll((n) => n.props && n.props.label === 'Fit to face')[0].props.active)
+    expect(found(tree.root.findAll((n) => n.props && n.props.label === 'Fit to face')[0], 'Fit to face').props.active)
       .toBe(false);
 
     await act(async () => {
-      latest().handler();
+      latest().handler(BACK_PRESS);
     });
     expect(onClose).toHaveBeenCalledTimes(1); // a second press does leave
   });
@@ -251,8 +277,8 @@ describe('Android hardware back', () => {
 describe('the captured temp file', () => {
   /** The alert captureRef's result is offered through, and its options. */
   const exportAlert = () => {
-    const [, , buttons, options] = Alert.alert.mock.calls[0];
-    return { buttons, options, button: (text) => buttons.find((b) => b.text === text) };
+    const [, , buttons = [], options] = found(jest.mocked(Alert.alert).mock.calls[0], 'the export alert');
+    return { buttons, options, button: (text: string) => found(buttons.find((b) => b.text === text), text) };
   };
 
   it.each(['Save to Photos', 'Share…', 'Cancel'])(
@@ -260,10 +286,10 @@ describe('the captured temp file', () => {
     async (text) => {
       const { tree } = await mountEditor();
       await press(tree, 'Photo\n+ guide');
-      const uri = await captureRef.mock.results[0].value;
+      const uri = await found(jest.mocked(captureRef).mock.results[0], 'a capture').value;
 
       await act(async () => {
-        await exportAlert().button(text).onPress();
+        await exportAlert().button(text).onPress?.();
       });
 
       // captureRef writes a full-resolution PNG to the temp directory and
@@ -280,7 +306,7 @@ describe('the captured temp file', () => {
 
     const { options } = exportAlert();
     expect(typeof options?.onDismiss).toBe('function');
-    await act(async () => options.onDismiss());
+    await act(async () => options?.onDismiss?.());
     expect(releaseCapture).toHaveBeenCalledWith('file:///tmp/export.png');
   });
 
@@ -290,18 +316,18 @@ describe('the captured temp file', () => {
     const { button, options } = exportAlert();
 
     await act(async () => {
-      await button('Cancel').onPress();
-      options.onDismiss();
+      await button('Cancel').onPress?.();
+      options?.onDismiss?.();
     });
     expect(releaseCapture).toHaveBeenCalledTimes(1);
   });
 
   it('is still released when saving to the library fails', async () => {
-    MediaLibrary.saveToLibraryAsync.mockRejectedValueOnce(new Error('disk full'));
+    jest.mocked(MediaLibrary.saveToLibraryAsync).mockRejectedValueOnce(new Error('disk full'));
     const { tree } = await mountEditor();
     await press(tree, 'Photo\n+ guide');
     await act(async () => {
-      await exportAlert().button('Save to Photos').onPress();
+      await exportAlert().button('Save to Photos').onPress?.();
     });
     expect(releaseCapture).toHaveBeenCalledTimes(1);
   });
@@ -309,12 +335,15 @@ describe('the captured temp file', () => {
 
 describe('the off-screen export views', () => {
   /** Every guide currently being rendered at full quality, anywhere. */
-  const fullQuality = (tree) =>
+  const fullQuality = (tree: ReactTestRenderer) =>
     tree.root.findAllByType(HeadGuide).filter((n) => !n.props.draft);
-  const gesture = (tree) =>
-    tree.root.findAll((n) => n.props && typeof n.props.onInteractingChange === 'function')[0];
-  const exportButton = (tree) =>
-    tree.root.findAll((n) => n.props && n.props.label === 'Photo\n+ guide')[0];
+  const gesture = (tree: ReactTestRenderer) =>
+    found(
+      tree.root.findAll((n) => n.props && typeof n.props.onInteractingChange === 'function')[0],
+      'the gesture layer'
+    );
+  const exportButton = (tree: ReactTestRenderer) =>
+    found(tree.root.findAll((n) => n.props && n.props.label === 'Photo\n+ guide')[0], 'the photo export button');
 
   it('sit out the gesture, so draft mode is not paid for three times over', async () => {
     // Free tier, so the only guides in the tree are the on-screen one and the
@@ -329,7 +358,7 @@ describe('the off-screen export views', () => {
     expect(fullQuality(tree)).toHaveLength(0);
     const onScreen = tree.root.findAllByType(HeadGuide);
     expect(onScreen).toHaveLength(1);
-    expect(onScreen[0].props.draft).toBe(true);
+    expect(onScreen[0]?.props.draft).toBe(true); // one guide, above
 
     await act(async () => gesture(tree).props.onInteractingChange(false));
     expect(fullQuality(tree)).toHaveLength(3);
@@ -361,7 +390,7 @@ describe('the debounced autosave', () => {
     // 'Pick up where you left off' has to include the last thing you did
     // before tapping '‹ Portraits'.
     expect(saveSettings).toHaveBeenCalledTimes(1);
-    const [id, settings] = saveSettings.mock.calls[0];
+    const [id, settings] = jest.mocked(saveSettings).mock.calls[0]!; // called once, above
     expect(id).toBe('p1');
     expect(settings.showCenter).toBe(true);
   });

@@ -18,9 +18,9 @@ import { haptics, setHapticsEnabled } from '../feedback';
 
 const realOS = Platform.OS;
 const calls = () =>
-  Haptics.selectionAsync.mock.calls.length +
-  Haptics.impactAsync.mock.calls.length +
-  Haptics.notificationAsync.mock.calls.length;
+  jest.mocked(Haptics.selectionAsync).mock.calls.length +
+  jest.mocked(Haptics.impactAsync).mock.calls.length +
+  jest.mocked(Haptics.notificationAsync).mock.calls.length;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -62,7 +62,7 @@ it('fires nothing on the web', () => {
 });
 
 it('swallows a device without a haptic engine', async () => {
-  Haptics.impactAsync.mockRejectedValueOnce(new Error('Haptics unavailable'));
+  jest.mocked(Haptics.impactAsync).mockRejectedValueOnce(new Error('Haptics unavailable'));
   expect(() => haptics.snap()).not.toThrow();
   await new Promise((resolve) => setImmediate(resolve)); // an unhandled rejection would fail the run
 });

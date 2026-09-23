@@ -5,13 +5,14 @@
  * gives a user who declines no way into the app at all.
  */
 import React from 'react';
-import renderer, { act } from 'react-test-renderer';
-import { Alert, Platform } from 'react-native';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
+import { Alert, Platform, Text } from 'react-native';
 
 jest.mock('expo-image-picker', () => ({
-  // The real enum, so the call below is checked against the value it carries.
+  // The real enums, so the call below is checked against the value it carries.
   UIImagePickerPreferredAssetRepresentationMode: jest.requireActual('expo-image-picker')
     .UIImagePickerPreferredAssetRepresentationMode,
+  PermissionStatus: jest.requireActual('expo-image-picker').PermissionStatus,
   requestMediaLibraryPermissionsAsync: jest.fn(async () => ({ granted: false })),
   requestCameraPermissionsAsync: jest.fn(async () => ({ granted: true })),
   launchImageLibraryAsync: jest.fn(async () => ({ canceled: true })),
@@ -19,35 +20,63 @@ jest.mock('expo-image-picker', () => ({
 }));
 jest.mock('../../lib/storage', () => ({
   listProjects: jest.fn(async () => []),
-  createProject: jest.fn(async (asset) => ({ id: 'p1', image: asset, settings: {} })),
+  createProject: jest.fn(async (asset: unknown) => ({ id: 'p1', image: asset, settings: {} })),
   deleteProject: jest.fn(async () => {}),
 }));
 
 import * as ImagePicker from 'expo-image-picker';
+import type { Project } from '../../lib/projectShape';
 import { createProject, deleteProject, listProjects } from '../../lib/storage';
 import HomeScreen from '../HomeScreen';
 
+/** `value`, which the test needs to be there: a missing one fails the test here, by name. */
+function found<T>(value: T | null | undefined, what: string): T {
+  if (value == null) throw new Error(`${what} is missing`);
+  return value;
+}
+
 async function mount() {
   const onOpenProject = jest.fn();
-  let tree;
+  let rendered: ReactTestRenderer | undefined;
   await act(async () => {
-    tree = renderer.create(<HomeScreen onOpenProject={onOpenProject} />);
+    rendered = renderer.create(<HomeScreen onOpenProject={onOpenProject} />);
   });
-  const pressByLabel = async (label) => {
+  const tree = found(rendered, 'the rendered home screen');
+  const pressByLabel = async (label: string) => {
     const button = tree.root
       .findAll((n) => n.props && typeof n.props.onPress === 'function')
-      .find((n) => n.findAllByType('Text').some((t) => t.props.children === label));
+      .find((n) => n.findAllByType(Text).some((t) => t.props.children === label));
     expect(button).toBeDefined();
     await act(async () => {
-      await button.props.onPress();
+      await found(button, label).props.onPress();
     });
   };
   return { tree, onOpenProject, pressByLabel };
 }
 
 const realOS = Platform.OS;
-const hadWindow = typeof global.window !== 'undefined';
-const realConfirm = hadWindow ? global.window.confirm : undefined;
+const hadWindow = typeof window !== 'undefined';
+const realConfirm = hadWindow ? window.confirm : undefined;
+
+/**
+ * Puts `value` where a page's confirm would be. The DOM types say a window
+ * always has one; the test environment's has none, and that is what is put
+ * back afterwards.
+ */
+const setConfirm = (value: unknown) =>
+  Object.defineProperty(window, 'confirm', { value, configurable: true, writable: true });
+
+/** A page to run on: the test environment's window, or one made for the test. */
+const onAPage = () => {
+  if (!hadWindow) Object.defineProperty(globalThis, 'window', { value: {}, configurable: true, writable: true });
+};
+
+/** A stand-in for the browser dialog that answers `answer`. */
+const dialog = (answer: boolean) => {
+  const confirm = jest.fn((_message?: string) => answer);
+  setConfirm(confirm);
+  return confirm;
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -57,8 +86,8 @@ beforeEach(() => {
 afterEach(() => {
   jest.restoreAllMocks();
   Platform.OS = realOS;
-  if (hadWindow) global.window.confirm = realConfirm;
-  else delete global.window;
+  if (hadWindow) setConfirm(realConfirm);
+  else Reflect.deleteProperty(globalThis, 'window');
 });
 
 describe('choosing a portrait', () => {
@@ -82,7 +111,12 @@ describe('choosing a portrait', () => {
   });
 
   it('still asks before opening the camera', async () => {
-    ImagePicker.requestCameraPermissionsAsync.mockResolvedValueOnce({ granted: false });
+    jest.mocked(ImagePicker.requestCameraPermissionsAsync).mockResolvedValueOnce({
+      granted: false,
+      status: ImagePicker.PermissionStatus.DENIED,
+      expires: 'never',
+      canAskAgain: true,
+    });
     const { pressByLabel } = await mount();
     await pressByLabel('Take a photo');
 
@@ -94,7 +128,7 @@ describe('choosing a portrait', () => {
 });
 
 describe('removing a recent portrait', () => {
-  const RECENT = {
+  const RECENT: Project = {
     id: 'p9',
     updatedAt: 1,
     image: { uri: 'file:///docs/portraits/p9.jpg', width: 10, height: 20 },
@@ -103,11 +137,11 @@ describe('removing a recent portrait', () => {
 
   /** Mount with one recent and hand back its long-press. */
   async function mountWithRecent() {
-    listProjects.mockResolvedValueOnce([RECENT]);
+    jest.mocked(listProjects).mockResolvedValueOnce([RECENT]);
     const { tree } = await mount();
     const thumb = tree.root.findAll((n) => n.props && typeof n.props.onLongPress === 'function')[0];
     expect(thumb).toBeDefined();
-    return () => act(async () => thumb.props.onLongPress());
+    return () => act(async () => found(thumb, 'the recent thumbnail').props.onLongPress());
   }
 
   it('asks through the browser dialog on the web, where Alert.alert is an empty stub', async () => {
@@ -115,21 +149,21 @@ describe('removing a recent portrait', () => {
     // confirm used to go through it, so on the web build a long-press showed
     // nothing and removed nothing, with no error to notice.
     Platform.OS = 'web';
-    if (!hadWindow) global.window = {};
-    global.window.confirm = jest.fn(() => true);
+    onAPage();
+    const confirm = dialog(true);
 
     const longPress = await mountWithRecent();
     await longPress();
 
-    expect(global.window.confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledTimes(1);
     expect(deleteProject).toHaveBeenCalledWith('p9');
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 
   it('removes nothing when the dialog is cancelled', async () => {
     Platform.OS = 'web';
-    if (!hadWindow) global.window = {};
-    global.window.confirm = jest.fn(() => false);
+    onAPage();
+    dialog(false);
 
     const longPress = await mountWithRecent();
     await longPress();
@@ -143,10 +177,10 @@ describe('removing a recent portrait', () => {
     await longPress();
 
     expect(Alert.alert).toHaveBeenCalledTimes(1);
-    const buttons = Alert.alert.mock.calls[0][2];
+    const [, , buttons = []] = jest.mocked(Alert.alert).mock.calls[0]!; // called once, above
     expect(buttons.map((b) => b.text)).toEqual(['Cancel', 'Remove']);
     expect(deleteProject).not.toHaveBeenCalled();
-    await act(async () => buttons[1].onPress());
+    await act(async () => buttons[1]?.onPress?.());
     expect(deleteProject).toHaveBeenCalledWith('p9');
   });
 });
@@ -154,10 +188,12 @@ describe('removing a recent portrait', () => {
 describe('a portrait that could not be copied anywhere durable', () => {
   it('is opened, but the user is told it will not be in Recent', async () => {
     const asset = { uri: 'file:///cache/IMG_1.jpg', width: 100, height: 200 };
-    ImagePicker.launchImageLibraryAsync.mockResolvedValueOnce({ canceled: false, assets: [asset] });
+    jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValueOnce({ canceled: false, assets: [asset] });
     // storage refuses to index a project whose durable copy failed, because a
     // Recent entry pointing into the OS cache goes blank and cannot be fixed.
-    createProject.mockResolvedValueOnce({ id: 'p1', image: asset, settings: null, ephemeral: true });
+    jest
+      .mocked(createProject)
+      .mockResolvedValueOnce({ id: 'p1', updatedAt: 0, image: asset, settings: null, ephemeral: true });
 
     const { onOpenProject, pressByLabel } = await mount();
     await pressByLabel('Choose a portrait');
@@ -168,7 +204,7 @@ describe('a portrait that could not be copied anywhere durable', () => {
 
   it('says nothing at all when the copy worked', async () => {
     const asset = { uri: 'file:///cache/IMG_2.jpg', width: 100, height: 200 };
-    ImagePicker.launchImageLibraryAsync.mockResolvedValueOnce({ canceled: false, assets: [asset] });
+    jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValueOnce({ canceled: false, assets: [asset] });
 
     const { onOpenProject, pressByLabel } = await mount();
     await pressByLabel('Choose a portrait');

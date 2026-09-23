@@ -7,14 +7,20 @@ jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { 
 jest.mock('../../lib/confirm', () => ({ confirmAction: jest.fn() }));
 
 import React from 'react';
-import renderer, { act } from 'react-test-renderer';
-import { Linking, Switch } from 'react-native';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
+import { Linking, Switch, Text } from 'react-native';
 
 import { confirmAction } from '../../lib/confirm';
 import { DEFAULTS } from '../../lib/settings';
-import SettingsScreen, { APP_VERSION, SOURCE_URL } from '../SettingsScreen';
+import SettingsScreen, { APP_VERSION, SOURCE_URL, type SettingsScreenProps } from '../SettingsScreen';
 
-let tree;
+let tree: ReactTestRenderer | null = null;
+
+/** The screen as last mounted. */
+const root = () => {
+  if (!tree) throw new Error('nothing is mounted');
+  return tree.root;
+};
 const props = () => ({
   settings: { ...DEFAULTS },
   onChange: jest.fn(),
@@ -22,19 +28,19 @@ const props = () => ({
   onClose: jest.fn(),
 });
 
-async function mount(p) {
+async function mount(p: SettingsScreenProps) {
   await act(async () => {
     tree = renderer.create(<SettingsScreen {...p} />);
   });
   return tree;
 }
 
-const pressByText = async (label) => {
-  const node = tree.root
+const pressByText = async (label: string) => {
+  const node = root()
     .findAll((n) => n.props && typeof n.props.onPress === 'function')
-    .find((n) => n.findAllByType('Text').some((t) => [].concat(t.props.children).join('') === label));
+    .find((n) => n.findAllByType(Text).some((t) => [].concat(t.props.children).join('') === label));
   expect(node).toBeDefined();
-  await act(async () => node.props.onPress());
+  await act(async () => node?.props.onPress());
 };
 
 beforeEach(() => {
@@ -42,7 +48,8 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  if (tree) await act(async () => tree.unmount());
+  const mounted = tree;
+  if (mounted) await act(async () => mounted.unmount());
   tree = null;
   jest.restoreAllMocks();
 });
@@ -50,7 +57,7 @@ afterEach(async () => {
 it('writes the Vibration switch as its own field, leaving the rest alone', async () => {
   const p = props();
   await mount(p);
-  const toggle = tree.root.findByType(Switch);
+  const toggle = root().findByType(Switch);
   expect(toggle.props.value).toBe(true);
   await act(async () => toggle.props.onValueChange(false));
   expect(p.onChange).toHaveBeenCalledWith({ haptics: false });
@@ -62,7 +69,7 @@ it('asks before resetting, and resets only when told to', async () => {
   await pressByText('Reset to defaults');
 
   expect(confirmAction).toHaveBeenCalledTimes(1);
-  const ask = confirmAction.mock.calls[0][0];
+  const ask = jest.mocked(confirmAction).mock.calls[0]![0]; // called once, above
   expect(ask.title).toBe('Reset settings?');
   expect(ask.message).toMatch(/portraits.*Pro/i); // says what it does not touch
   expect(ask.cancelLabel).toBe('Cancel');
@@ -84,7 +91,7 @@ it('hands the source link, and only that, to the operating system', async () => 
 it('shows the version the build carries', async () => {
   expect(APP_VERSION).toBe('1.2.3');
   await mount(props());
-  expect(tree.root.findAllByType('Text').some((t) => [].concat(t.props.children).join('') === 'DrawDraw 1.2.3')).toBe(true);
+  expect(root().findAllByType(Text).some((t) => [].concat(t.props.children).join('') === 'DrawDraw 1.2.3')).toBe(true);
 });
 
 it('closes', async () => {
@@ -96,8 +103,8 @@ it('closes', async () => {
 
 it('gives every control a role, and the switch its label', async () => {
   await mount(props());
-  const pressables = tree.root.findAll((n) => n.props && typeof n.props.onPress === 'function' && typeof n.type !== 'string');
+  const pressables = root().findAll((n) => n.props && typeof n.props.onPress === 'function' && typeof n.type !== 'string');
   expect(pressables.length).toBeGreaterThanOrEqual(3); // Close, Reset, the link
   for (const node of pressables) expect(node.props.accessibilityRole).toMatch(/^(button|link)$/);
-  expect(tree.root.findByType(Switch).props.accessibilityLabel).toBe('Vibration');
+  expect(root().findByType(Switch).props.accessibilityLabel).toBe('Vibration');
 });

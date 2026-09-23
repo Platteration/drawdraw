@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { PanResponder, StyleSheet, View, type NativeTouchEvent } from 'react-native';
+import { PanResponder, StyleSheet, View } from 'react-native';
 
 import { haptics } from '../lib/feedback';
 import { HEAD_OFFSET_RANGE, type HeadTransform } from '../lib/headModel';
@@ -48,8 +48,19 @@ interface TouchGeometry {
   angle: number;
 }
 
+/** Where a finger is on the page, which is all the layer reads of one. */
+interface TouchPoint {
+  pageX: number;
+  pageY: number;
+}
+
+/** The part of a responder event the layer reads; a GestureResponderEvent is one. */
+export interface TouchesEvent {
+  nativeEvent: { touches: readonly TouchPoint[] };
+}
+
 /** Where the fingers are, or null when none is down: there is nothing to measure then. */
-function touchGeometry(touches: readonly NativeTouchEvent[]): TouchGeometry | null {
+function touchGeometry(touches: readonly TouchPoint[]): TouchGeometry | null {
   const t1 = touches[0];
   const t2 = touches[1];
   if (!t1) return null;
@@ -65,11 +76,86 @@ function touchGeometry(touches: readonly NativeTouchEvent[]): TouchGeometry | nu
   };
 }
 
+/** The props the gestures read, kept current by the component on every render. */
+interface Live {
+  mode: string;
+  transform: HeadTransform;
+  onChange: (next: HeadTransform) => void;
+  width: number;
+  height: number;
+  onInteractingChange: (interacting: boolean) => void;
+}
+
+/** The pose and the finger geometry a gesture started from. */
+interface Anchor {
+  transform: HeadTransform;
+  geo: TouchGeometry;
+}
+
 /**
- * Full-canvas touch layer driving the 3D head:
- *  - one finger: rotate (yaw/pitch) in "rotate" mode, or reposition in "move" mode
- *  - two fingers: pinch to scale, twist to roll, drag to reposition (any mode)
+ * The layer's pan-responder callbacks. The component makes its PanResponder
+ * once, from the first set, so they read the props through `live`; the
+ * gesture's anchor and the yaw last snapped to are theirs alone, kept beside
+ * them. Their events are typed by what they read (the fingers), which a
+ * GestureResponderEvent satisfies and a test can make without a touch history.
  */
+export function gestureCallbacks(live: { current: Live }) {
+  const base: { current: Anchor | null } = { current: null }; // { transform, geo } snapshot at gesture start
+  const lastSnap: { current: number | null } = { current: null }; // yaw value most recently snapped to
+  return {
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onPanResponderGrant: (evt: TouchesEvent) => {
+      live.current.onInteractingChange(true);
+      // A grant comes with a finger down; without one there is nothing to
+      // anchor to, and the moves that follow wait for the next grant.
+      const geo = touchGeometry(evt.nativeEvent.touches);
+      base.current = geo && { transform: live.current.transform, geo };
+    },
+    onPanResponderMove: (evt: TouchesEvent) => {
+      const geo = touchGeometry(evt.nativeEvent.touches);
+      if (!geo || !base.current) return;
+
+      // Finger count changed mid-gesture: re-anchor so nothing jumps.
+      if (geo.count !== base.current.geo.count) {
+        base.current = { transform: live.current.transform, geo };
+        return;
+      }
+
+      const { mode: m, onChange: change, width: w, height: h } = live.current;
+      const start = base.current.transform;
+      const startGeo = base.current.geo;
+      const dx = geo.x - startGeo.x;
+      const dy = geo.y - startGeo.y;
+
+      if (geo.count >= 2) {
+        const scale =
+          startGeo.dist > 0 ? clamp(start.scale * (geo.dist / startGeo.dist), 0.1, 3) : start.scale;
+        const roll = start.roll - ((geo.angle - startGeo.angle) * 180) / Math.PI;
+        change({ ...start, scale, roll, ...place(start, dx, dy, w, h) });
+      } else if (m === 'move') {
+        change({ ...start, ...place(start, dx, dy, w, h) });
+      } else {
+        change({
+          ...start,
+          yaw: snapYaw(start.yaw + dx * 0.4, lastSnap),
+          pitch: clamp(start.pitch + dy * 0.4, -90, 90),
+        });
+      }
+    },
+    onPanResponderRelease: () => {
+      base.current = null;
+      lastSnap.current = null;
+      live.current.onInteractingChange(false);
+    },
+    onPanResponderTerminate: () => {
+      base.current = null;
+      lastSnap.current = null;
+      live.current.onInteractingChange(false);
+    },
+  };
+}
+
 export interface HeadGestureLayerProps {
   /** 'move' repositions with one finger; any other mode rotates. */
   mode: string;
@@ -80,6 +166,11 @@ export interface HeadGestureLayerProps {
   onInteractingChange?: (interacting: boolean) => void;
 }
 
+/**
+ * Full-canvas touch layer driving the 3D head:
+ *  - one finger: rotate (yaw/pitch) in "rotate" mode, or reposition in "move" mode
+ *  - two fingers: pinch to scale, twist to roll, drag to reposition (any mode)
+ */
 export default function HeadGestureLayer({
   mode,
   transform,
@@ -91,64 +182,7 @@ export default function HeadGestureLayer({
   const live = useRef({ mode, transform, onChange, width, height, onInteractingChange });
   live.current = { mode, transform, onChange, width, height, onInteractingChange };
 
-  // { transform, geo } snapshot at gesture start
-  const base = useRef<{ transform: HeadTransform; geo: TouchGeometry } | null>(null);
-  const lastSnap = useRef<number | null>(null); // yaw value most recently snapped to
-
-  const responder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (evt) => {
-        live.current.onInteractingChange(true);
-        // A grant comes with a finger down; without one there is nothing to
-        // anchor to, and the moves that follow wait for the next grant.
-        const geo = touchGeometry(evt.nativeEvent.touches);
-        base.current = geo && { transform: live.current.transform, geo };
-      },
-      onPanResponderMove: (evt) => {
-        const geo = touchGeometry(evt.nativeEvent.touches);
-        if (!geo || !base.current) return;
-
-        // Finger count changed mid-gesture: re-anchor so nothing jumps.
-        if (geo.count !== base.current.geo.count) {
-          base.current = { transform: live.current.transform, geo };
-          return;
-        }
-
-        const { mode: m, onChange: change, width: w, height: h } = live.current;
-        const start = base.current.transform;
-        const startGeo = base.current.geo;
-        const dx = geo.x - startGeo.x;
-        const dy = geo.y - startGeo.y;
-
-        if (geo.count >= 2) {
-          const scale =
-            startGeo.dist > 0 ? clamp(start.scale * (geo.dist / startGeo.dist), 0.1, 3) : start.scale;
-          const roll = start.roll - ((geo.angle - startGeo.angle) * 180) / Math.PI;
-          change({ ...start, scale, roll, ...place(start, dx, dy, w, h) });
-        } else if (m === 'move') {
-          change({ ...start, ...place(start, dx, dy, w, h) });
-        } else {
-          change({
-            ...start,
-            yaw: snapYaw(start.yaw + dx * 0.4, lastSnap),
-            pitch: clamp(start.pitch + dy * 0.4, -90, 90),
-          });
-        }
-      },
-      onPanResponderRelease: () => {
-        base.current = null;
-        lastSnap.current = null;
-        live.current.onInteractingChange(false);
-      },
-      onPanResponderTerminate: () => {
-        base.current = null;
-        lastSnap.current = null;
-        live.current.onInteractingChange(false);
-      },
-    })
-  ).current;
+  const responder = useRef(PanResponder.create(gestureCallbacks(live))).current;
 
   return <View style={StyleSheet.absoluteFill} {...responder.panHandlers} />;
 }

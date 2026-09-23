@@ -10,10 +10,14 @@ const MAX_EXPORT_DIMENSION = 4096; // the cap EditorScreen clamps exports to
  * whose format has scale 0, RNViewShot.mm:137-141 in 5.1.0); Android and web
  * treat it as pixels.
  */
-const delivered = (pixels, { platform, pixelRatio }) => {
+const delivered = (
+  pixels: { width: number; height: number },
+  { platform, pixelRatio }: { platform: string; pixelRatio: number }
+) => {
   const size = captureSize(pixels, { platform, pixelRatio });
   const scale = platform === 'ios' ? pixelRatio : 1;
-  return { width: size.width * scale, height: size.height * scale };
+  // A usable size always comes back as numbers; NaN here fails every check below.
+  return { width: (size.width ?? NaN) * scale, height: (size.height ?? NaN) * scale };
 };
 
 describe('captureSize', () => {

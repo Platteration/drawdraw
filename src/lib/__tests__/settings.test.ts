@@ -5,19 +5,18 @@
  * Object.prototype is never a value, and the fold from the old onboarding
  * key never loses the flag — not on a failed write, not on a second run.
  */
-jest.mock('@react-native-async-storage/async-storage', () => {
-  const store = new Map();
-  return {
-    __store: store,
-    getItem: jest.fn(async (key) => (store.has(key) ? store.get(key) : null)),
-    setItem: jest.fn(async (key, value) => {
-      store.set(key, value);
-    }),
-    removeItem: jest.fn(async (key) => {
-      store.delete(key);
-    }),
-  };
-});
+// What AsyncStorage holds, as a test reads and plants it. The factory below is
+// hoisted above this line, which is fine: it only reads the map when called.
+const mockStore = new Map<string, string>();
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn(async (key: string) => (mockStore.has(key) ? mockStore.get(key) : null)),
+  setItem: jest.fn(async (key: string, value: string) => {
+    mockStore.set(key, value);
+  }),
+  removeItem: jest.fn(async (key: string) => {
+    mockStore.delete(key);
+  }),
+}));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -129,32 +128,32 @@ describe('resetSettings', () => {
 describe('the onboarded flag migration', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    AsyncStorage.__store.clear();
-    AsyncStorage.setItem.mockImplementation(async (key, value) => {
-      AsyncStorage.__store.set(key, value);
+    mockStore.clear();
+    jest.mocked(AsyncStorage.setItem).mockImplementation(async (key, value) => {
+      mockStore.set(key, value);
     });
-    AsyncStorage.getItem.mockImplementation(async (key) =>
-      AsyncStorage.__store.has(key) ? AsyncStorage.__store.get(key) : null
+    jest.mocked(AsyncStorage.getItem).mockImplementation(async (key) =>
+      mockStore.has(key) ? (mockStore.get(key) ?? null) : null
     );
   });
 
   it('old only: folds the flag into the new record and removes the old key', async () => {
-    AsyncStorage.__store.set(OLD, '1');
+    mockStore.set(OLD, '1');
     expect(await loadSettings()).toEqual({ ...D, seenIntro: true });
-    expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ seenIntro: true }));
-    expect(AsyncStorage.__store.has(OLD)).toBe(false);
+    expect(mockStore.get(NEW)).toBe(JSON.stringify({ seenIntro: true }));
+    expect(mockStore.has(OLD)).toBe(false);
   });
 
   it('old only, with a value the old reader did not count as seen', async () => {
     // The old reader was `v === '1'`; the fold says exactly what it said.
-    AsyncStorage.__store.set(OLD, '0');
+    mockStore.set(OLD, '0');
     expect(await loadSettings()).toEqual({ ...D, seenIntro: false });
-    expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ seenIntro: false }));
-    expect(AsyncStorage.__store.has(OLD)).toBe(false);
+    expect(mockStore.get(NEW)).toBe(JSON.stringify({ seenIntro: false }));
+    expect(mockStore.has(OLD)).toBe(false);
   });
 
   it('new only: reads it and writes nothing', async () => {
-    AsyncStorage.__store.set(NEW, JSON.stringify({ haptics: false, seenIntro: true }));
+    mockStore.set(NEW, JSON.stringify({ haptics: false, seenIntro: true }));
     expect(await loadSettings()).toEqual({ haptics: false, seenIntro: true });
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
@@ -163,66 +162,66 @@ describe('the onboarded flag migration', () => {
   it('both present: the new record wins, untouched, and the old key goes', async () => {
     // A migrated build wrote NEW and then could not remove OLD; NEW is what it
     // has read and written since, so NEW is the newer record.
-    AsyncStorage.__store.set(NEW, JSON.stringify({ haptics: false, seenIntro: false }));
-    AsyncStorage.__store.set(OLD, '1');
+    mockStore.set(NEW, JSON.stringify({ haptics: false, seenIntro: false }));
+    mockStore.set(OLD, '1');
     expect(await loadSettings()).toEqual({ haptics: false, seenIntro: false });
-    expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ haptics: false, seenIntro: false }));
+    expect(mockStore.get(NEW)).toBe(JSON.stringify({ haptics: false, seenIntro: false }));
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-    expect(AsyncStorage.__store.has(OLD)).toBe(false);
+    expect(mockStore.has(OLD)).toBe(false);
   });
 
   it('write fails: keeps the old key for the next launch, and still honours it now', async () => {
-    AsyncStorage.__store.set(OLD, '1');
-    AsyncStorage.setItem.mockRejectedValueOnce(new Error('QuotaExceededError'));
+    mockStore.set(OLD, '1');
+    jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('QuotaExceededError'));
 
     expect(await loadSettings()).toEqual({ ...D, seenIntro: true });
-    expect(AsyncStorage.__store.has(NEW)).toBe(false);
-    expect(AsyncStorage.__store.get(OLD)).toBe('1'); // not removed: nothing replaced it
+    expect(mockStore.has(NEW)).toBe(false);
+    expect(mockStore.get(OLD)).toBe('1'); // not removed: nothing replaced it
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
 
     // The next launch, with storage back, completes it.
     expect(await loadSettings()).toEqual({ ...D, seenIntro: true });
-    expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ seenIntro: true }));
-    expect(AsyncStorage.__store.has(OLD)).toBe(false);
+    expect(mockStore.get(NEW)).toBe(JSON.stringify({ seenIntro: true }));
+    expect(mockStore.has(OLD)).toBe(false);
   });
 
   it('write fails: honours a never-seen flag too, not the unreadable-storage answer', async () => {
     // migrateOnboarded's own guard, not loadSettings' outer catch: that one
     // answers seenIntro true for every failure, which for a '0' would skip an
     // intro that was never dismissed.
-    AsyncStorage.__store.set(OLD, '0');
-    AsyncStorage.setItem.mockRejectedValueOnce(new Error('QuotaExceededError'));
+    mockStore.set(OLD, '0');
+    jest.mocked(AsyncStorage.setItem).mockRejectedValueOnce(new Error('QuotaExceededError'));
     expect(await loadSettings()).toEqual({ ...D, seenIntro: false });
-    expect(AsyncStorage.__store.has(NEW)).toBe(false);
-    expect(AsyncStorage.__store.get(OLD)).toBe('0');
+    expect(mockStore.has(NEW)).toBe(false);
+    expect(mockStore.get(OLD)).toBe('0');
   });
 
   it('old only, remove fails after the write: the record stands and the flag is honoured', async () => {
     // The write succeeded, so NEW is the record from here on; a remove that
     // fails is retried by the next launch's cleanup, and must not cost this
     // one the flag it just folded.
-    AsyncStorage.__store.set(OLD, '0');
-    AsyncStorage.removeItem.mockRejectedValueOnce(new Error('busy'));
+    mockStore.set(OLD, '0');
+    jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('busy'));
     expect(await loadSettings()).toEqual({ ...D, seenIntro: false });
-    expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ seenIntro: false }));
-    expect(AsyncStorage.__store.get(OLD)).toBe('0');
+    expect(mockStore.get(NEW)).toBe(JSON.stringify({ seenIntro: false }));
+    expect(mockStore.get(OLD)).toBe('0');
 
     expect(await loadSettings()).toEqual({ ...D, seenIntro: false });
-    expect(AsyncStorage.__store.has(OLD)).toBe(false);
+    expect(mockStore.has(OLD)).toBe(false);
   });
 
   it("both present, remove fails: the user's own record, not the defaults", async () => {
     // dropLegacy's guard: a cleanup that cannot remove the old key is not a
     // reason to read the record as the defaults for this session.
-    AsyncStorage.__store.set(NEW, JSON.stringify({ haptics: false, seenIntro: false }));
-    AsyncStorage.__store.set(OLD, '1');
-    AsyncStorage.removeItem.mockRejectedValueOnce(new Error('busy'));
+    mockStore.set(NEW, JSON.stringify({ haptics: false, seenIntro: false }));
+    mockStore.set(OLD, '1');
+    jest.mocked(AsyncStorage.removeItem).mockRejectedValueOnce(new Error('busy'));
     expect(await loadSettings()).toEqual({ haptics: false, seenIntro: false });
-    expect(AsyncStorage.__store.get(OLD)).toBe('1');
+    expect(mockStore.get(OLD)).toBe('1');
   });
 
   it('run twice: the second run finds the new record and changes nothing', async () => {
-    AsyncStorage.__store.set(OLD, '1');
+    mockStore.set(OLD, '1');
     const first = await loadSettings();
     jest.clearAllMocks();
 
@@ -230,42 +229,42 @@ describe('the onboarded flag migration', () => {
     expect(second).toEqual(first);
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
     expect(AsyncStorage.removeItem).not.toHaveBeenCalled();
-    expect([...AsyncStorage.__store.keys()]).toEqual([NEW]);
+    expect([...mockStore.keys()]).toEqual([NEW]);
   });
 
   it('neither: the defaults, and nothing written', async () => {
     expect(await loadSettings()).toEqual(D);
     expect(AsyncStorage.setItem).not.toHaveBeenCalled();
-    expect(AsyncStorage.__store.size).toBe(0);
+    expect(mockStore.size).toBe(0);
   });
 
   it('counts the intro as seen when storage cannot be read at all', async () => {
     // Nothing could be saved either, so the alternative is the intro on every
     // launch — which is what the old reader's catch already refused.
-    AsyncStorage.getItem.mockRejectedValue(new Error('storage unavailable'));
+    jest.mocked(AsyncStorage.getItem).mockRejectedValue(new Error('storage unavailable'));
     expect(await loadSettings()).toEqual({ ...D, seenIntro: true });
   });
 
   it('reads a record that is not JSON as no record', async () => {
-    AsyncStorage.__store.set(NEW, '{not json');
+    mockStore.set(NEW, '{not json');
     expect(await loadSettings()).toEqual(D);
   });
 
   it('cleans a record on the way in', async () => {
-    AsyncStorage.__store.set(NEW, JSON.stringify({ haptics: 'constructor', seenIntro: true, theme: 'dark' }));
+    mockStore.set(NEW, JSON.stringify({ haptics: 'constructor', seenIntro: true, theme: 'dark' }));
     expect(await loadSettings()).toEqual({ haptics: true, seenIntro: true });
   });
 });
 
 describe('persistSettings', () => {
   it('writes the record under the settings key', async () => {
-    AsyncStorage.__store.clear();
+    mockStore.clear();
     await persistSettings({ haptics: false, seenIntro: true });
-    expect(AsyncStorage.__store.get(NEW)).toBe(JSON.stringify({ haptics: false, seenIntro: true }));
+    expect(mockStore.get(NEW)).toBe(JSON.stringify({ haptics: false, seenIntro: true }));
   });
 
   it('round-trips through loadSettings', async () => {
-    AsyncStorage.__store.clear();
+    mockStore.clear();
     await persistSettings({ haptics: false, seenIntro: true });
     expect(await loadSettings()).toEqual({ haptics: false, seenIntro: true });
   });

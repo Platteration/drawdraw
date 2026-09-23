@@ -22,15 +22,24 @@ npx expo export --platform ios --platform android --output-dir .export-check
 `tsconfig.json` extends `expo/tsconfig.base` the way the sibling apps' do, and
 lists the `jest` and `node` types because the tests read the file system;
 `@types/node` is a devDependency for that reason only, pinned to the Node 22
-line CI runs. `App.tsx`, `index.ts` and everything under `src/` are TypeScript;
-the tools that run under plain Node (`tools/`, `e2e/`, `plugins/`, the config
-files) stay JavaScript. Types describe what the code does: no `as` casts, no
-`any`, no `@ts-ignore` or `@ts-expect-error`. An index that can miss is handled
-as a miss; a non-null assertion (`!`) is only for an index the code beside it has
-bounded (a loop condition, a remainder, a length check), with the bound said in
-a comment. A function that is defensive about its input (the storage
-validators, `portraitExtension`, `captureSize`) takes `unknown` or the wide type
-it checks, so its tests can hand it junk without a cast.
+line CI runs. `App.tsx`, `index.ts`, everything under `src/` and every test are
+TypeScript (jest matches `*.test.ts` and `*.test.tsx` only); the tools that run
+under plain Node (`tools/`, `e2e/`, `plugins/`, the config files) stay
+JavaScript. Types describe what the code does: no `as` casts, no `any`, no
+`@ts-ignore` or `@ts-expect-error`, in the tests as well. An index that can miss
+is handled as a miss; a non-null assertion (`!`) is only for an index the code
+beside it has bounded (a loop condition, a remainder, a length check, a
+`toHaveBeenCalledTimes` just above), with the bound said in a comment. A
+function that is defensive about its input (the storage validators,
+`portraitExtension`, `captureSize`) takes `unknown` or the wide type it checks,
+so its tests can hand it junk without a cast. Tests reach a mocked module's
+functions through `jest.mocked()`, keep a mocked AsyncStorage's contents in a
+`mockStore` map beside the factory, and throw a named Error (a small `found()`
+helper in the screen tests) where the renderer or a mock's call list could come
+back empty. A React
+Native event cannot be made whole in a test (its targets are host elements), so
+`HeadGestureLayer` exports `gestureCallbacks`, typed by the fingers it reads,
+and its test drives those.
 
 `npx expo export` is the fastest way to confirm a change still compiles for both
 platforms. `npm run test:e2e` is how to confirm it actually *runs*: there is no
@@ -52,7 +61,7 @@ before pushing.
   `expo-file-system/legacy` and `expo-media-library/legacy`: since SDK 54 and 56
   the package roots are object APIs whose functions of the old names are stubs
   that throw. The unit suites mock native modules wholesale, so
-  `__tests__/nativeApi.test.js` checks every name the app calls on a mocked
+  `__tests__/nativeApi.test.ts` checks every name the app calls on a mocked
   module against the installed package's own type declarations.
 - `src/lib/projectShape.ts` — checks what comes back out of storage, and
   defines the shapes it checks (`Project`, `ProjectSettings`). Anything
@@ -68,7 +77,7 @@ before pushing.
   permission the app does not use, `INTERNET` included; this adds `INTERNET` back
   to `android/app/src/debug/AndroidManifest.xml` at prebuild, so a development
   build can load its bundle and the release build still has no network
-  capability. `__tests__/appConfig.test.js` holds both halves.
+  capability. `__tests__/appConfig.test.ts` holds both halves.
 - `tools/make-icons.mjs` — renders `assets/` from `headModel.ts`, which it
   imports by that name: Node strips the types itself from 22.18 on, which is
   why `engines.node` says `>=22.18`. Node warns once that the package has no
@@ -100,7 +109,7 @@ before pushing.
 
 ## Native configuration
 
-The Android/iOS posture is pinned by `__tests__/appConfig.test.js`, which
+The Android/iOS posture is pinned by `__tests__/appConfig.test.ts`, which
 introspects the real plugin chain (`expo config --type introspect`) rather than
 reading app.json alone: app.json states every key the test pins, even at its
 default, so the two say the same thing and a default that moves between SDKs
@@ -114,7 +123,7 @@ the test holds both absent. Edge-to-edge is mandatory on Android, so every scree
 takes its insets from `react-native-safe-area-context` — React Native's own
 `SafeAreaView` insets on iOS only — and each Modal (Settings, the paywall) carries
 its own `SafeAreaView`, because a Modal is a window of its own and inherits none
-of the root's padding; `__tests__/App.test.js` pins both. The
+of the root's padding; `__tests__/App.test.tsx` pins both. The
 adaptive icon is three generated layers (`adaptive-icon.png`,
 `android-icon-background.png`, `android-icon-monochrome.png`) out of
 `tools/make-icons.mjs` — the monochrome layer is the foreground's geometry in
@@ -128,7 +137,7 @@ which git and the lint config ignore; delete it after a local run.
 
 User preferences are one record under `drawdraw.settings.v1`, beside the project index
 (`drawdraw.projects.v1`) and the Pro flag (`drawdraw.entitlements.v1`); every key is named
-in `KEYS` in `src/lib/settings.ts`, and `__tests__/settings-contract.test.js` pins the key
+in `KEYS` in `src/lib/settings.ts`, and `__tests__/settings-contract.test.tsx` pins the key
 list, the rows (`haptics`, `seenIntro`) and the enum tables (none yet: both fields are
 booleans, and the first enum row adds its table to `TABLES`). `settings.ts` is the
 validator — pure, like `projectShape.ts` — and every read goes through `cleanSettings` /
@@ -145,11 +154,11 @@ touches the settings record alone — never projects, Pro or `seenIntro`, which 
 was shown rather than a preference. Confirmations go through `src/lib/confirm.ts`, because
 react-native-web's `Alert.alert` is an empty stub and a two-button confirm through it did
 nothing on the web build the e2e drives. There is no theme row: the app has one palette, and
-`__tests__/appearance.test.js` pins `userInterfaceStyle: light` to that. About shows the
+`__tests__/appearance.test.ts` pins `userInterfaceStyle: light` to that. About shows the
 version from `expo-constants` (`Constants.expoConfig.version`, app.json's `version`; not yet
 checked on an EAS build, where `appVersionSource: remote` may need `expo-application` as the
 fallback) and the source link — the one URL the app hands to the OS, which
-`appConfig.test.js` pins to that single `Linking.openURL` call.
+`appConfig.test.ts` pins to that single `Linking.openURL` call.
 
 ## Conventions
 

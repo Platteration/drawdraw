@@ -16,9 +16,9 @@ jest.mock('../src/lib/storage', () => ({
   saveSettings: jest.fn(async () => {}),
 }));
 
-const mockReads = new Map();
+const mockReads = new Map<string, Promise<string | null>>();
 jest.mock('@react-native-async-storage/async-storage', () => ({
-  getItem: jest.fn((key) => mockReads.get(key)),
+  getItem: jest.fn((key: string) => mockReads.get(key)),
   setItem: jest.fn(async () => {}),
   removeItem: jest.fn(async () => {}),
 }));
@@ -29,11 +29,11 @@ jest.mock('../src/lib/feedback', () => ({
 // The provider waits for the native side to report the insets before it
 // renders anything, and there is no native side here; the library's own mock
 // reports zero insets at once and leaves SafeAreaView the real component.
-jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
+jest.mock('react-native-safe-area-context', () => jest.requireActual('react-native-safe-area-context/jest/mock').default);
 
-import React from 'react';
+import React, { type ElementType } from 'react';
 import { Modal } from 'react-native';
-import renderer, { act } from 'react-test-renderer';
+import renderer, { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -51,17 +51,24 @@ const SEEN = JSON.stringify({ seenIntro: true });
 
 /** A stored value whose read this test resolves by hand. */
 function deferred() {
-  let resolve;
-  const promise = new Promise((r) => {
+  let resolve: (value: string | null) => void = () => {};
+  const promise = new Promise<string | null>((r) => {
     resolve = r;
   });
   return { promise, resolve };
 }
 
-let tree;
+let tree: ReactTestRenderer | null = null;
+
+/** The app as last rendered. */
+const root = () => {
+  if (!tree) throw new Error('nothing is rendered');
+  return tree.root;
+};
 
 afterEach(async () => {
-  if (tree) await act(async () => tree.unmount());
+  const rendered = tree;
+  if (rendered) await act(async () => rendered.unmount());
   tree = null;
   mockReads.clear();
   jest.clearAllMocks();
@@ -80,12 +87,12 @@ it('shows a paying customer nothing at all rather than the free build', async ()
   // until it does, so rendering here would strip the Pro construction lines
   // out of the guide and offer to sell someone what they already own — then
   // silently change its mind a frame later.
-  expect(tree.root.findAllByType(HomeScreen)).toHaveLength(0);
-  expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(0);
+  expect(root().findAllByType(HomeScreen)).toHaveLength(0);
+  expect(root().findAllByType(OnboardingScreen)).toHaveLength(0);
 
   await act(async () => entitlements.resolve(JSON.stringify({ pro: true })));
 
-  const home = tree.root.findByType(HomeScreen);
+  const home = root().findByType(HomeScreen);
   expect(home.props.pro).toBe(true); // and it was never rendered any other way
 });
 
@@ -97,10 +104,10 @@ it('waits for the settings, which hold the onboarding flag, too', async () => {
   await act(async () => {
     tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
   });
-  expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(0);
+  expect(root().findAllByType(OnboardingScreen)).toHaveLength(0);
 
   await act(async () => settings.resolve(null));
-  expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(1);
+  expect(root().findAllByType(OnboardingScreen)).toHaveLength(1);
 });
 
 it('honours the onboarding flag the previous build wrote, and moves it', async () => {
@@ -114,8 +121,8 @@ it('honours the onboarding flag the previous build wrote, and moves it', async (
     tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
   });
 
-  expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(0);
-  expect(tree.root.findAllByType(HomeScreen)).toHaveLength(1);
+  expect(root().findAllByType(OnboardingScreen)).toHaveLength(0);
+  expect(root().findAllByType(HomeScreen)).toHaveLength(1);
   expect(AsyncStorage.setItem).toHaveBeenCalledWith(SETTINGS_KEY, SEEN);
   expect(AsyncStorage.removeItem).toHaveBeenCalledWith(ONBOARDED_KEY);
 });
@@ -130,11 +137,11 @@ it('writes the dismissal of the intro to the settings record', async () => {
   await act(async () => {
     tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
   });
-  const intro = tree.root.findByType(OnboardingScreen);
+  const intro = root().findByType(OnboardingScreen);
   await act(async () => intro.props.onDone());
 
-  expect(tree.root.findAllByType(OnboardingScreen)).toHaveLength(0);
-  expect(tree.root.findAllByType(HomeScreen)).toHaveLength(1);
+  expect(root().findAllByType(OnboardingScreen)).toHaveLength(0);
+  expect(root().findAllByType(HomeScreen)).toHaveLength(1);
   expect(AsyncStorage.setItem).toHaveBeenCalledWith(
     SETTINGS_KEY,
     JSON.stringify({ haptics: true, seenIntro: true })
@@ -162,7 +169,7 @@ it('renders the free build for someone who has not bought it', async () => {
     tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
   });
 
-  expect(tree.root.findByType(HomeScreen).props.pro).toBe(false);
+  expect(root().findByType(HomeScreen).props.pro).toBe(false);
 });
 
 describe('the system bars', () => {
@@ -172,17 +179,17 @@ describe('the system bars', () => {
   // the main tree, and one inside each Modal, whose content inherits none of
   // the root's padding. React Native's own SafeAreaView would pass on iOS and
   // do nothing on Android, so the type is react-native-safe-area-context's.
-  const nearest = (instance, type) => {
+  const nearest = (instance: ReactTestInstance, type: ElementType) => {
     for (let node = instance.parent; node; node = node.parent) {
       if (node.type === type) return node;
     }
     return null;
   };
   /** The screen's nearest SafeAreaView sits inside the Modal it is shown in. */
-  const insetWithinItsModal = (screen) => {
+  const insetWithinItsModal = (screen: ReactTestInstance) => {
     const inset = nearest(screen, SafeAreaView);
     expect(inset).not.toBeNull();
-    expect(nearest(inset, Modal)).toBe(nearest(screen, Modal));
+    expect(inset && nearest(inset, Modal)).toBe(nearest(screen, Modal));
     expect(nearest(screen, Modal)).not.toBeNull();
   };
 
@@ -195,18 +202,18 @@ describe('the system bars', () => {
   });
 
   it('keeps the main screens clear of them', () => {
-    const home = tree.root.findByType(HomeScreen);
+    const home = root().findByType(HomeScreen);
     expect(nearest(home, SafeAreaView)).not.toBeNull();
     expect(nearest(home, Modal)).toBeNull();
   });
 
   it('keeps Settings clear of them, inside its own Modal', async () => {
-    await act(async () => tree.root.findByType(HomeScreen).props.onOpenSettings());
-    insetWithinItsModal(tree.root.findByType(SettingsScreen));
+    await act(async () => root().findByType(HomeScreen).props.onOpenSettings());
+    insetWithinItsModal(root().findByType(SettingsScreen));
   });
 
   it('keeps the paywall clear of them, inside its own Modal', async () => {
-    await act(async () => tree.root.findByType(HomeScreen).props.onRequestPro());
-    insetWithinItsModal(tree.root.findByType(PaywallScreen));
+    await act(async () => root().findByType(HomeScreen).props.onRequestPro());
+    insetWithinItsModal(root().findByType(PaywallScreen));
   });
 });

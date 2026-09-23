@@ -3,13 +3,24 @@
  * thing they press. Without a subscriber it closes the app.
  */
 import React from 'react';
-import renderer, { act } from 'react-test-renderer';
-import { BackHandler, Platform } from 'react-native';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
+import { BackHandler, Platform, Text } from 'react-native';
 
 import OnboardingScreen from '../OnboardingScreen';
 
 const realOS = Platform.OS;
-let backHandlers = [];
+/** What Android hands a back handler; onboarding's reads none of it. */
+const BACK_PRESS = { type: 'hardwareBackPress', timeStamp: 0 };
+let backHandlers: {
+  event: string;
+  handler: (event: typeof BACK_PRESS) => boolean | null | undefined;
+}[] = [];
+
+/** `value`, which the test needs to be there: a missing one fails the test here, by name. */
+function found<T>(value: T | null | undefined, what: string): T {
+  if (value == null) throw new Error(`${what} is missing`);
+  return value;
+}
 
 beforeEach(() => {
   backHandlers = [];
@@ -24,28 +35,32 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-const latest = () => backHandlers[backHandlers.length - 1].handler;
+const latest = () => {
+  const { handler } = found(backHandlers.at(-1), 'a back handler');
+  return () => handler(BACK_PRESS);
+};
 
-async function mount({ platform = 'android' } = {}) {
+async function mount({ platform = 'android' }: { platform?: typeof Platform.OS } = {}) {
   Platform.OS = platform;
   const onDone = jest.fn();
-  let tree;
+  let rendered: ReactTestRenderer | undefined;
   await act(async () => {
-    tree = renderer.create(<OnboardingScreen onDone={onDone} />, {
+    rendered = renderer.create(<OnboardingScreen onDone={onDone} />, {
       createNodeMock: () => ({ scrollTo: () => {} }),
     });
   });
+  const tree = found(rendered, 'the rendered onboarding');
   /** The footer's forward button, by the label it is showing. */
   const pressNext = async () => {
     const button = tree.root
       .findAll((n) => n.props && typeof n.props.onPress === 'function')
       .find((n) =>
         n
-          .findAllByType('Text')
+          .findAllByType(Text)
           .some((t) => t.props.children === 'Next' || t.props.children === 'Start drawing')
       );
     await act(async () => {
-      button.props.onPress();
+      found(button, 'the forward button').props.onPress();
     });
   };
   return { tree, onDone, pressNext };
@@ -56,7 +71,7 @@ describe('Android hardware back during onboarding', () => {
     const { onDone, pressNext } = await mount();
     await pressNext(); // now on page 2 of 3
 
-    let handled;
+    let handled: boolean | null | undefined;
     await act(async () => {
       handled = latest()();
     });
@@ -72,7 +87,7 @@ describe('Android hardware back during onboarding', () => {
 
   it('lets the system handle back on the first page', async () => {
     const { onDone } = await mount();
-    let handled;
+    let handled: boolean | null | undefined;
     await act(async () => {
       handled = latest()();
     });

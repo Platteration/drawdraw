@@ -4,16 +4,15 @@
  * does not exist — otherwise the app accumulates full-resolution copies of
  * people's faces that nothing can reach, or Recent entries that go blank.
  */
-jest.mock('@react-native-async-storage/async-storage', () => {
-  const store = new Map();
-  return {
-    __store: store,
-    getItem: jest.fn(async (key) => (store.has(key) ? store.get(key) : null)),
-    setItem: jest.fn(async (key, value) => {
-      store.set(key, value);
-    }),
-  };
-});
+// What AsyncStorage holds, as a test reads and plants it. The factory below is
+// hoisted above this line, which is fine: it only reads the map when called.
+const mockStore = new Map<string, string>();
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  getItem: jest.fn(async (key: string) => (mockStore.has(key) ? mockStore.get(key) : null)),
+  setItem: jest.fn(async (key: string, value: string) => {
+    mockStore.set(key, value);
+  }),
+}));
 
 // The legacy entry point is the one storage.ts imports: the package root has
 // had the File/Directory API since SDK 54, and its functions of these names
@@ -36,20 +35,29 @@ jest.mock('../projectShape', () => {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { sanitizeProjects } from '../projectShape';
+import { sanitizeProjects, type Project } from '../projectShape';
 import { createProject, deleteProject, listProjects, saveSettings } from '../storage';
 
-const realSanitizeProjects = jest.requireActual('../projectShape').sanitizeProjects;
+const realSanitizeProjects = jest.requireActual<typeof import('../projectShape')>('../projectShape').sanitizeProjects;
+
+/** What a build with no validator would hand back: the parsed index, unexamined. */
+const unvalidated = (raw: unknown): Project[] => (Array.isArray(raw) ? raw : []);
 
 const INDEX_KEY = 'drawdraw.projects.v1';
 const PORTRAIT_DIR = 'file:///docs/portraits/';
 const MAX_PROJECTS = 30; // storage.ts's own ceiling
 
-const stored = (projects) => AsyncStorage.__store.set(INDEX_KEY, JSON.stringify(projects));
-const readIndex = () => JSON.parse(AsyncStorage.__store.get(INDEX_KEY));
+/** Plants an index, well-formed or not. */
+const stored = (projects: unknown[]) => mockStore.set(INDEX_KEY, JSON.stringify(projects));
+/** The index as it was last written; there has to be one. */
+const readIndex = (): Project[] => {
+  const raw = mockStore.get(INDEX_KEY);
+  if (raw === undefined) throw new Error('no index was written');
+  return JSON.parse(raw);
+};
 
 /** `count` durable projects, oldest last, the way the index is ordered. */
-const seed = (count) =>
+const seed = (count: number): Project[] =>
   Array.from({ length: count }, (_, i) => ({
     id: `old${i}`,
     updatedAt: count - i,
@@ -61,11 +69,18 @@ const ASSET = { uri: 'file:///cache/IMG_0001.jpg', width: 4032, height: 3024 };
 
 beforeEach(() => {
   jest.clearAllMocks();
-  sanitizeProjects.mockImplementation(realSanitizeProjects);
-  AsyncStorage.__store.clear();
-  FileSystem.getInfoAsync.mockResolvedValue({ exists: true });
-  FileSystem.copyAsync.mockResolvedValue(undefined);
-  FileSystem.deleteAsync.mockResolvedValue(undefined);
+  jest.mocked(sanitizeProjects).mockImplementation(realSanitizeProjects);
+  mockStore.clear();
+  // storage.ts reads `exists` alone; the rest is what a directory's info carries.
+  jest.mocked(FileSystem.getInfoAsync).mockResolvedValue({
+    exists: true,
+    uri: PORTRAIT_DIR,
+    size: 0,
+    isDirectory: true,
+    modificationTime: 0,
+  });
+  jest.mocked(FileSystem.copyAsync).mockResolvedValue(undefined);
+  jest.mocked(FileSystem.deleteAsync).mockResolvedValue(undefined);
 });
 
 describe('createProject', () => {
@@ -87,7 +102,7 @@ describe('createProject', () => {
 
     const index = readIndex();
     expect(index).toHaveLength(MAX_PROJECTS);
-    expect(index[0].id).toBe(project.id);
+    expect(index[0]?.id).toBe(project.id);
     // The oldest record is gone from the index; its copy has to go with it,
     // or every import past the thirtieth orphans a full-resolution portrait.
     const oldest = `old${MAX_PROJECTS - 1}`;
@@ -109,14 +124,14 @@ describe('createProject', () => {
     // A project that fell back to the picker's URI owns nothing in the
     // portraits directory, and that URI is not ours to delete.
     const survivors = seed(MAX_PROJECTS);
-    survivors[MAX_PROJECTS - 1].image.uri = 'file:///cache/someone-elses.jpg';
+    survivors[MAX_PROJECTS - 1]!.image.uri = 'file:///cache/someone-elses.jpg'; // seeded MAX_PROJECTS
     stored(survivors);
     await createProject(ASSET);
     expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
   });
 
   it('keeps a project whose durable copy failed out of the index', async () => {
-    FileSystem.copyAsync.mockRejectedValue(new Error('no space left on device'));
+    jest.mocked(FileSystem.copyAsync).mockRejectedValue(new Error('no space left on device'));
     stored(seed(2));
 
     const project = await createProject(ASSET);
@@ -144,14 +159,14 @@ describe('deleteProject', () => {
 
   it('survives a file that has already gone', async () => {
     stored(seed(2));
-    FileSystem.deleteAsync.mockRejectedValue(new Error('ENOENT'));
+    jest.mocked(FileSystem.deleteAsync).mockRejectedValue(new Error('ENOENT'));
     await expect(deleteProject('old0')).resolves.toBeUndefined();
     expect(readIndex().map((p) => p.id)).toEqual(['old1']);
   });
 });
 
 describe('removePortrait', () => {
-  const record = (uri) => ({ id: 'tampered', updatedAt: 9, image: { uri, width: 1, height: 1 } });
+  const record = (uri: string) => ({ id: 'tampered', updatedAt: 9, image: { uri, width: 1, height: 1 } });
 
   it('will not delete above the portraits directory, whatever the index says', async () => {
     // The prefix guard alone is satisfied by a path that climbs back out of
@@ -160,7 +175,7 @@ describe('removePortrait', () => {
     // file holding this very index among them. sanitizeProject refuses such a
     // record too; this asserts the deletion guard without it, because a
     // long-press delete and the MAX_PROJECTS truncation both call it.
-    sanitizeProjects.mockImplementation((raw) => raw); // as a laxer build would
+    jest.mocked(sanitizeProjects).mockImplementation(unvalidated); // as a laxer build would
     for (const uri of [
       `${PORTRAIT_DIR}../../databases/RKStorage`,
       `${PORTRAIT_DIR}..%2f..%2fdatabases/RKStorage`,
@@ -183,9 +198,9 @@ describe('removePortrait', () => {
   it('will not delete above it when the truncation is what fired', async () => {
     // MAX_PROJECTS drops the oldest record and removes its file with nobody
     // asking for a deletion at all.
-    sanitizeProjects.mockImplementation((raw) => raw);
+    jest.mocked(sanitizeProjects).mockImplementation(unvalidated);
     const survivors = seed(MAX_PROJECTS);
-    survivors[MAX_PROJECTS - 1].image.uri = `${PORTRAIT_DIR}../../databases/RKStorage`;
+    survivors[MAX_PROJECTS - 1]!.image.uri = `${PORTRAIT_DIR}../../databases/RKStorage`; // seeded MAX_PROJECTS
     stored(survivors);
     await createProject(ASSET);
     expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
@@ -203,7 +218,7 @@ describe('listProjects', () => {
   });
 
   it('is empty rather than throwing on an index that is not JSON', async () => {
-    AsyncStorage.__store.set(INDEX_KEY, '{not json');
+    mockStore.set(INDEX_KEY, '{not json');
     expect(await listProjects()).toEqual([]);
   });
 
@@ -211,6 +226,6 @@ describe('listProjects', () => {
     stored([seed(1)[0], { id: 'broken' }]);
     await saveSettings('old0', { showHead: false });
     expect(readIndex().map((p) => p.id)).toEqual(['old0']);
-    expect(readIndex()[0].settings).toEqual({ showHead: false });
+    expect(readIndex()[0]?.settings).toEqual({ showHead: false });
   });
 });

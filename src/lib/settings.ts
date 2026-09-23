@@ -39,7 +39,7 @@ export const LEGACY_KEYS = {
  * The settings record. `seenIntro` records what was shown rather than a
  * preference, which is why `resetSettings` keeps it. There is no theme: the
  * app has one palette (src/theme.ts), so a row offering a choice would be a
- * lie, and `__tests__/appearance.test.js` pins the native config to match.
+ * lie, and `__tests__/appearance.test.ts` pins the native config to match.
  */
 export interface Settings {
   haptics: boolean;

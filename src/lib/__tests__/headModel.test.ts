@@ -7,28 +7,42 @@ import {
   projectLandmarks,
   PROPORTION_PRESETS,
   rotationMatrix,
+  type ElementSet,
+  type ProjectedPoint,
+  type Proportions,
+  type Wireframe,
 } from '../headModel';
 
-const ALL_ELEMENTS = Object.fromEntries(ELEMENTS.map((el) => [el.key, true]));
+const ALL_ELEMENTS: ElementSet = Object.fromEntries(ELEMENTS.map((el) => [el.key, true]));
 
-const allPoints = (wire) =>
+const allPoints = (wire: Wireframe) =>
   [...wire.front, ...wire.back, wire.outline].flatMap((poly) => poly.points);
 
-const extent = (points, axis) => Math.max(...points.map((p) => Math.abs(p[axis])));
+const extent = (points: ProjectedPoint[], axis: 'x' | 'y') => Math.max(...points.map((p) => Math.abs(p[axis])));
+
+/** A proportion preset the app ships, by key. */
+function preset(key: string): Proportions {
+  const found = PROPORTION_PRESETS.find((p) => p.key === key);
+  if (!found) throw new Error(`no preset ${key}`);
+  return found.values;
+}
 
 describe('rotationMatrix', () => {
   it('is orthonormal for arbitrary angles', () => {
-    for (const [y, p, r] of [
+    const angles: [number, number, number][] = [
       [0, 0, 0],
       [37, -12, 88],
       [-155, 63, -41],
-    ]) {
+    ];
+    for (const [y, p, r] of angles) {
       const m = rotationMatrix(y, p, r);
       for (let i = 0; i < 3; i++) {
-        const rowNorm = Math.hypot(...m[i]);
+        const row = m[i]!; // i < 3, and the matrix has three rows
+        const rowNorm = Math.hypot(...row);
         expect(rowNorm).toBeCloseTo(1, 10);
         for (let j = i + 1; j < 3; j++) {
-          const dot = m[i][0] * m[j][0] + m[i][1] * m[j][1] + m[i][2] * m[j][2];
+          const other = m[j]!; // j < 3
+          const dot = row[0] * other[0] + row[1] * other[1] + row[2] * other[2];
           expect(dot).toBeCloseTo(0, 10);
         }
       }
@@ -94,7 +108,7 @@ describe('buildHeadWireframe', () => {
     // must get exactly what it asked for.
     const withCenter = buildHeadWireframe(30, 0, 0, { elements: { center: true } });
     const without = buildHeadWireframe(30, 0, 0, { elements: {} });
-    const count = (w) => w.front.length + w.back.length;
+    const count = (w: Wireframe) => w.front.length + w.back.length;
     expect(count(without)).toBeLessThan(count(withCenter));
   });
 
@@ -102,7 +116,7 @@ describe('buildHeadWireframe', () => {
     const bare = buildHeadWireframe(30, 0, 0, { elements: {} });
     const some = buildHeadWireframe(30, 0, 0, { elements: { center: true, eyeLine: true } });
     const all = buildHeadWireframe(30, 0, 0, { elements: ALL_ELEMENTS });
-    const count = (w) => w.front.length + w.back.length;
+    const count = (w: Wireframe) => w.front.length + w.back.length;
     expect(count(some)).toBeGreaterThan(count(bare));
     expect(count(all)).toBeGreaterThan(count(some));
   });
@@ -115,9 +129,19 @@ describe('buildHeadWireframe', () => {
     });
     expect(allPoints(draft).length).toBeLessThan(allPoints(full).length * 0.6);
     // Same head, just described with fewer points: the silhouette must agree.
-    for (const axis of ['x', 'y']) {
+    const axes: ('x' | 'y')[] = ['x', 'y'];
+    for (const axis of axes) {
       expect(extent(draft.outline.points, axis)).toBeCloseTo(extent(full.outline.points, axis), 2);
     }
+  });
+
+  it('builds nothing, rather than throwing, from curves with no points', () => {
+    // No caller in the app asks for fewer than one sample; this is what the
+    // hidden-line split does with an empty closed curve, which used to throw.
+    const wire = buildHeadWireframe(0, 0, 0, { samples: -1 });
+    expect(wire.front).toEqual([]);
+    expect(wire.back).toEqual([]);
+    expect(wire.outline.points).toEqual([]);
   });
 
   it('scales with the width and depth proportions', () => {
@@ -139,7 +163,7 @@ describe('projectLandmarks', () => {
 
   it('foreshortens the two segments unequally once the head tips', () => {
     // This inequality is precisely the signal the fit solver reads.
-    const ratio = (pitch) => {
+    const ratio = (pitch: number) => {
       const [chin, nose, brow] = projectLandmarks(0, pitch, 0);
       return (nose.y - chin.y) / (brow.y - nose.y);
     };
@@ -148,7 +172,7 @@ describe('projectLandmarks', () => {
     expect(ratio(-20)).toBeGreaterThan(1);
     // and it is monotonic, so a measured ratio names one pitch
     const samples = [-40, -20, 0, 20, 40].map(ratio);
-    for (let i = 1; i < samples.length; i++) expect(samples[i]).toBeLessThan(samples[i - 1]);
+    for (let i = 1; i < samples.length; i++) expect(samples[i]).toBeLessThan(samples[i - 1]!); // 0 <= i - 1
   });
 
   it('swings the nose and brow off the chin line once the head turns', () => {
@@ -160,7 +184,7 @@ describe('projectLandmarks', () => {
   });
 
   it('moves the landmarks when proportions change', () => {
-    const child = PROPORTION_PRESETS.find((p) => p.key === 'child').values;
+    const child = preset('child');
     const [, adultNose] = projectLandmarks(0, 0, 0);
     const [, childNose] = projectLandmarks(0, 0, 0, child);
     expect(childNose.y).toBeLessThan(adultNose.y); // a child's features sit lower

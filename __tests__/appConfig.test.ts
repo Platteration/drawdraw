@@ -8,11 +8,21 @@
  * even at the default, so the file and this test say the same thing and a
  * default that moves between SDKs moves visibly.
  */
-const { execFileSync } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const zlib = require('zlib');
+import { execFileSync } from 'child_process';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import zlib from 'zlib';
+
+import type { ExportedConfig } from 'expo/config-plugins';
+
+import plugin, { addInternetPermission, DEBUG_MANIFEST, writeDebugManifest } from '../plugins/withDebugInternet';
+
+/** An element of a manifest or resource file as the config plugins parse it: attributes under `$`. */
+interface XmlElement {
+  $: Record<string, string | undefined>;
+  _?: string;
+}
 
 const root = path.join(__dirname, '..');
 const appConfig = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8')).expo;
@@ -39,10 +49,12 @@ const introspected = JSON.parse(
 const androidResults = introspected._internal.modResults.android;
 const manifest = androidResults.manifest.manifest;
 /** res/values/colors.xml as the plugins leave it, name -> value. */
-const colors = Object.fromEntries(androidResults.colors.resources.color.map((c) => [c.$.name, c._]));
+const colors = Object.fromEntries(androidResults.colors.resources.color.map((c: XmlElement) => [c.$.name, c._]));
 /** gradle.properties as the plugins leave it, key -> value. */
 const gradleProperties = Object.fromEntries(
-  androidResults.gradleProperties.filter((p) => p.type === 'property').map((p) => [p.key, p.value])
+  androidResults.gradleProperties
+    .filter((p: { type: string }) => p.type === 'property')
+    .map((p: { key: string; value: string }) => [p.key, p.value])
 );
 
 /**
@@ -65,8 +77,8 @@ const INTERNET = 'android.permission.INTERNET';
  * Every AndroidManifest.xml under `dir`. `isDirectory()` is false for a
  * symlink, so a linked package — and any cycle through one — is left alone.
  */
-const manifestsUnder = (dir) => {
-  const out = [];
+const manifestsUnder = (dir: string): string[] => {
+  const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) out.push(...manifestsUnder(full));
@@ -80,9 +92,9 @@ const manifestsUnder = (dir) => {
  * the entry points. What the config asks for is justified against this
  * rather than assumed.
  */
-function appSource() {
-  const sources = [];
-  const walk = (dir) => {
+function appSource(): string {
+  const sources: string[] = [];
+  const walk = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
@@ -103,14 +115,14 @@ function appSource() {
  * A PNG as tools/png.mjs writes them: 8-bit RGBA, no filtering. Enough to
  * check an asset the generator produced; not a general decoder.
  */
-function readPng(file) {
+function readPng(file: string) {
   const buf = fs.readFileSync(file);
   expect(buf.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
   expect(buf.toString('ascii', 12, 16)).toBe('IHDR');
   const width = buf.readUInt32BE(16);
   const height = buf.readUInt32BE(20);
   expect([buf[24], buf[25]]).toEqual([8, 6]); // bit depth 8, truecolour with alpha
-  const idat = [];
+  const idat: Buffer[] = [];
   for (let offset = 8; offset < buf.length; ) {
     const length = buf.readUInt32BE(offset);
     if (buf.toString('ascii', offset + 4, offset + 8) === 'IDAT') {
@@ -128,8 +140,8 @@ function readPng(file) {
   return { width, height, pixels };
 }
 
-const pluginOptions = (name) => {
-  const entry = appConfig.plugins.find((p) => (Array.isArray(p) ? p[0] : p) === name);
+const pluginOptions = (name: string) => {
+  const entry = appConfig.plugins.find((p: unknown) => (Array.isArray(p) ? p[0] : p) === name);
   expect(entry).toBeDefined();
   return Array.isArray(entry) ? entry[1] || {} : {};
 };
@@ -141,10 +153,10 @@ describe('permissions requested by the config plugins', () => {
     // 'display over other apps' overlay) that nothing here ever asked for, and
     // blockedPermissions is the only thing that takes one back out.
     const declared = manifest['uses-permission']
-      .filter((p) => p.$['tools:node'] !== 'remove')
-      .map((p) => p.$['android:name']);
+      .filter((p: XmlElement) => p.$['tools:node'] !== 'remove')
+      .map((p: XmlElement) => p.$['android:name']);
     expect(declared.length).toBeGreaterThan(0); // the introspection found a manifest at all
-    expect(declared.filter((name) => !USED.includes(name))).toEqual([]);
+    expect(declared.filter((name: string) => !USED.includes(name))).toEqual([]);
   });
 
   it('blocks every permission a bundled native module merges in', () => {
@@ -162,11 +174,12 @@ describe('permissions requested by the config plugins', () => {
     // only held for expo-branded permission creep, and the module someone adds
     // tomorrow is the one it is for.
     const files = manifestsUnder(path.join(root, 'node_modules'));
-    const declaredBy = new Map(); // permission -> the manifests declaring it
+    const declaredBy = new Map<string, string[]>(); // permission -> the manifests declaring it
     for (const file of files) {
       const xml = fs.readFileSync(file, 'utf8');
-      for (const m of xml.matchAll(/<uses-permission[^>]*android:name="([^"]+)"/g)) {
-        declaredBy.set(m[1], [...(declaredBy.get(m[1]) || []), path.relative(root, file)]);
+      // The group is not optional, so a match always has it.
+      for (const [, name = ''] of xml.matchAll(/<uses-permission[^>]*android:name="([^"]+)"/g)) {
+        declaredBy.set(name, [...(declaredBy.get(name) || []), path.relative(root, file)]);
       }
     }
 
@@ -218,7 +231,7 @@ describe('what leaves the device', () => {
     // app's own documents' into 'sends them somewhere'. expo-file-system
     // declares it, so it has to be blocked rather than merely not asked for.
     const internet = manifest['uses-permission'].find(
-      (p) => p.$['android:name'] === INTERNET
+      (p: XmlElement) => p.$['android:name'] === INTERNET
     );
     expect(internet).toBeDefined(); // it is in the merge, and being removed
     expect(internet.$['tools:node']).toBe('remove');
@@ -240,7 +253,7 @@ describe('what leaves the device', () => {
     // decision rather than a drift.
     expect(appSource().match(/\bLinking\.\w+\([^)]*\)/g)).toEqual(['Linking.openURL(SOURCE_URL)']);
     const settingsScreen = fs.readFileSync(path.join(root, 'src/screens/SettingsScreen.tsx'), 'utf8');
-    expect(/export const SOURCE_URL = '([^']+)'/.exec(settingsScreen)[1]).toBe(
+    expect(/export const SOURCE_URL = '([^']+)'/.exec(settingsScreen)?.[1]).toBe(
       'https://github.com/Platteration/drawdraw'
     );
     // ...and with no URL handled anywhere (the link goes out, none come in),
@@ -257,7 +270,6 @@ describe('what leaves the device', () => {
     // SYSTEM_ALERT_WINDOW. The release variant never reads that file.
     expect(appConfig.plugins).toContain('./plugins/withDebugInternet');
 
-    const plugin = require('../plugins/withDebugInternet');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drawdraw-prebuild-'));
     try {
       // What expo-template-bare-minimum@57.0.26 puts there, verbatim.
@@ -271,15 +283,29 @@ describe('what leaves the device', () => {
         '</manifest>',
         '',
       ].join('\n');
-      const file = path.join(dir, plugin.DEBUG_MANIFEST);
+      const file = path.join(dir, DEBUG_MANIFEST);
       fs.mkdirSync(path.dirname(file), { recursive: true });
       fs.writeFileSync(file, template);
 
-      const config = plugin({ name: 'DrawDraw', slug: 'drawdraw' });
-      expect(typeof config.mods.android.dangerous).toBe('function');
-      await config.mods.android.dangerous({
+      // A config with its mods: the plugin's return type is the ExpoConfig it
+      // was given, and `mods` is the optional part it adds.
+      const config: ExportedConfig = plugin({ name: 'DrawDraw', slug: 'drawdraw' });
+      const dangerous = config.mods?.android?.dangerous;
+      expect(typeof dangerous).toBe('function');
+      if (!dangerous) throw new Error('the plugin registered no dangerous mod');
+      // The plugin reads modRequest.platformProjectRoot; the rest is what a
+      // prebuild hands every mod.
+      await dangerous({
         ...config,
-        modRequest: { platformProjectRoot: dir },
+        modResults: undefined,
+        modRawConfig: config,
+        modRequest: {
+          projectRoot: dir,
+          platformProjectRoot: dir,
+          modName: 'dangerous',
+          platform: 'android',
+          introspect: false,
+        },
       });
 
       const written = fs.readFileSync(file, 'utf8');
@@ -288,10 +314,10 @@ describe('what leaves the device', () => {
       expect(written).toContain('android.permission.SYSTEM_ALERT_WINDOW');
       expect(written).toContain('usesCleartextTraffic');
       // ...and running it again changes nothing.
-      expect(plugin.addInternetPermission(written)).toBe(written);
+      expect(addInternetPermission(written)).toBe(written);
       // A project whose template wrote no debug manifest gets one.
       const fresh = path.join(dir, 'fresh');
-      expect(fs.readFileSync(plugin.writeDebugManifest(fresh), 'utf8')).toContain(
+      expect(fs.readFileSync(writeDebugManifest(fresh), 'utf8')).toContain(
         'android.permission.INTERNET'
       );
     } finally {
@@ -319,7 +345,7 @@ describe('Android system bars', () => {
     // from react-native-safe-area-context, at the pin expo@57 bundles. React
     // Native's own SafeAreaView insets on iOS only, which would put the
     // Android header and export row under the status bar and the gesture
-    // pill; __tests__/App.test.js holds that every screen, the two in Modals
+    // pill; __tests__/App.test.tsx holds that every screen, the two in Modals
     // included, sits inside the library's instead.
     expect(appConfig.android.edgeToEdgeEnabled).toBeUndefined();
     expect(gradleProperties['expo.edgeToEdgeEnabled']).toBeUndefined();
@@ -409,10 +435,10 @@ describe('what the sibling apps pin', () => {
 
 describe('the launcher icon', () => {
   const PAPER = [0xf4, 0xef, 0xe6]; // the app's backgroundColor, as the generator has it
-  let icon;
-  let foreground;
-  let background;
-  let monochrome;
+  let icon: { foregroundImage: string; backgroundImage: string; monochromeImage: string };
+  let foreground: ReturnType<typeof readPng>;
+  let background: ReturnType<typeof readPng>;
+  let monochrome: ReturnType<typeof readPng>;
 
   beforeAll(() => {
     icon = appConfig.android.adaptiveIcon;

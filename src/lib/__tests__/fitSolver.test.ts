@@ -1,10 +1,32 @@
 import { solveHeadFromTaps } from '../fitSolver';
-import { DEFAULT_PROPORTIONS, HEAD_HEIGHT_UNITS, projectLandmarks, PROPORTION_PRESETS } from '../headModel';
+import {
+  DEFAULT_PROPORTIONS,
+  HEAD_HEIGHT_UNITS,
+  projectLandmarks,
+  PROPORTION_PRESETS,
+  type HeadTransform,
+  type Point2,
+  type Proportions,
+} from '../headModel';
 
 const VIEW = { width: 900, height: 1200 };
 
+/** The solve for taps that have one: a null (no fit) fails the test here. */
+function solve(taps: Point2[], view = VIEW, proportions?: Proportions): HeadTransform {
+  const solved = solveHeadFromTaps(taps, view, proportions);
+  if (!solved) throw new Error('solveHeadFromTaps found no fit');
+  return solved;
+}
+
+/** A proportion preset the app ships, by key. */
+function preset(key: string): Proportions {
+  const found = PROPORTION_PRESETS.find((p) => p.key === key);
+  if (!found) throw new Error(`no preset ${key}`);
+  return found.values;
+}
+
 /** Synthesize the three taps a user would make for a known ground-truth pose. */
-function tapsFor(pose, proportions = DEFAULT_PROPORTIONS, noise = () => 0) {
+function tapsFor(pose: HeadTransform, proportions: Proportions = DEFAULT_PROPORTIONS, noise = () => 0) {
   const ppu = (pose.scale * VIEW.height) / HEAD_HEIGHT_UNITS;
   return projectLandmarks(pose.yaw, pose.pitch, pose.roll, proportions).map((p) => ({
     x: pose.x * VIEW.width + p.x * ppu + noise(),
@@ -13,7 +35,7 @@ function tapsFor(pose, proportions = DEFAULT_PROPORTIONS, noise = () => 0) {
 }
 
 /** Deterministic pseudo-random jitter, so the noise test cannot flake. */
-function jitter(amplitude, seed = 7) {
+function jitter(amplitude: number, seed = 7) {
   let state = seed;
   return () => {
     state = (state * 1103515245 + 12345) % 2147483648;
@@ -32,7 +54,7 @@ const POSES = [
 
 describe('solveHeadFromTaps', () => {
   it.each(POSES)('recovers the pose exactly from clean taps (yaw $yaw, pitch $pitch)', (pose) => {
-    const solved = solveHeadFromTaps(tapsFor(pose), VIEW);
+    const solved = solve(tapsFor(pose));
     expect(solved.yaw).toBeCloseTo(pose.yaw, 0);
     expect(solved.pitch).toBeCloseTo(pose.pitch, 0);
     expect(solved.roll).toBeCloseTo(pose.roll, 0);
@@ -44,7 +66,7 @@ describe('solveHeadFromTaps', () => {
   it('stays close under fingertip-scale tap error', () => {
     const noise = jitter(6);
     for (const pose of POSES.slice(0, 4)) {
-      const solved = solveHeadFromTaps(tapsFor(pose, DEFAULT_PROPORTIONS, noise), VIEW);
+      const solved = solve(tapsFor(pose, DEFAULT_PROPORTIONS, noise));
       expect(Math.abs(solved.yaw - pose.yaw)).toBeLessThan(8);
       expect(Math.abs(solved.pitch - pose.pitch)).toBeLessThan(8);
       expect(Math.abs(solved.roll - pose.roll)).toBeLessThan(8);
@@ -53,9 +75,9 @@ describe('solveHeadFromTaps', () => {
   });
 
   it('solves against non-default proportions', () => {
-    const child = PROPORTION_PRESETS.find((p) => p.key === 'child').values;
+    const child = preset('child');
     const pose = { yaw: 25, pitch: -10, roll: 5, x: 0.5, y: 0.45, scale: 0.6 };
-    const solved = solveHeadFromTaps(tapsFor(pose, child), VIEW, child);
+    const solved = solve(tapsFor(pose, child), VIEW, child);
     expect(solved.yaw).toBeCloseTo(pose.yaw, 0);
     expect(solved.pitch).toBeCloseTo(pose.pitch, 0);
     expect(solved.scale).toBeCloseTo(pose.scale, 2);
@@ -70,7 +92,7 @@ describe('solveHeadFromTaps', () => {
 
   it('returns angles in a canonical range and a usable scale', () => {
     for (const pose of POSES) {
-      const solved = solveHeadFromTaps(tapsFor(pose), VIEW);
+      const solved = solve(tapsFor(pose));
       expect(solved.roll).toBeGreaterThanOrEqual(-180);
       expect(solved.roll).toBeLessThanOrEqual(180);
       expect(solved.pitch).toBeGreaterThanOrEqual(-90);
@@ -82,7 +104,7 @@ describe('solveHeadFromTaps', () => {
   it('tracks a head drawn larger or smaller in the frame', () => {
     for (const scale of [0.25, 0.5, 0.9, 1.4]) {
       const pose = { yaw: 15, pitch: 5, roll: 0, x: 0.5, y: 0.45, scale };
-      expect(solveHeadFromTaps(tapsFor(pose), VIEW).scale).toBeCloseTo(scale, 2);
+      expect(solve(tapsFor(pose)).scale).toBeCloseTo(scale, 2);
     }
   });
 });

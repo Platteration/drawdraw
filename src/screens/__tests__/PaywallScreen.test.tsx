@@ -11,17 +11,24 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
 }));
 
 import React from 'react';
-import renderer, { act } from 'react-test-renderer';
+import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
+import { Text } from 'react-native';
 
 import { notConfiguredProvider, PRODUCTS, setPurchaseProvider } from '../../lib/purchases';
 import PaywallScreen from '../PaywallScreen';
 
 const CURRENCY = /[$£€¥]\s?\d|\d+[.,]\d\d/;
-let tree;
+let tree: ReactTestRenderer | null = null;
+
+/** The paywall as last mounted. */
+const root = () => {
+  if (!tree) throw new Error('nothing is mounted');
+  return tree.root;
+};
 
 const buyLabel = () =>
-  tree.root
-    .findAllByType('Text')
+  root()
+    .findAllByType(Text)
     .map((t) => [].concat(t.props.children).join(''))
     .find((s) => s.startsWith('Unlock Pro'));
 
@@ -32,7 +39,8 @@ async function mount() {
 }
 
 afterEach(async () => {
-  if (tree) await act(async () => tree.unmount());
+  const mounted = tree;
+  if (mounted) await act(async () => mounted.unmount());
   tree = null;
 });
 
@@ -44,7 +52,7 @@ it('shows no price when the bundled provider cannot sell', async () => {
   expect(label).toBe('Unlock Pro · not available in this build');
   expect(label).not.toMatch(CURRENCY);
   // and the listing's own amount reaches no text on the screen
-  expect(tree.root.findAllByType('Text').some((t) => String(t.props.children).includes(PRODUCTS.pro.price))).toBe(false);
+  expect(root().findAllByType(Text).some((t) => String(t.props.children).includes(PRODUCTS.pro.price))).toBe(false);
 });
 
 it("shows the provider's price, not the listing's, once a store is configured", async () => {
