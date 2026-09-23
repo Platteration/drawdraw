@@ -100,10 +100,15 @@ export interface Point2 {
   y: number;
 }
 
-/** A curve in model space, with its own normals where the ellipsoid's are wrong. */
+/**
+ * A curve in model space. Where the ellipsoid's normal is wrong for it, it
+ * carries its own, as a function of the point: there is one for every point by
+ * construction, so no curve can run out of normals part-way and quietly take
+ * the ellipsoid's for the rest (which would swap its solid and dashed runs).
+ */
 interface Curve {
   points: Vec3[];
-  normals?: Vec3[];
+  normal?: (p: Vec3) => Vec3;
   closed: boolean;
 }
 
@@ -278,7 +283,7 @@ const axes = (proportions: Proportions, samples: number): Axes => ({
 
 // --- curve builders -------------------------------------------------------
 // Each returns { points: [[x,y,z]…], closed } in model space. Normals are
-// derived from the ellipsoid unless a curve supplies its own.
+// derived from the ellipsoid unless a curve supplies its own `normal`.
 
 /** Horizontal cross-section of the ellipsoid at local height y0. */
 function latitudeRing(y0: number, { A, C, samples }: Axes): Curve {
@@ -331,14 +336,13 @@ function ear(side: number, { A, C, samples }: Axes, { noseY, browY }: Proportion
   const rz = C * s * 0.3;
   const cz = -C * s * 0.12; // set slightly behind the side plane's center
   const points: Vec3[] = [];
-  const normals: Vec3[] = [];
   const half = Math.round(samples / 2);
   for (let i = 0; i < half; i++) {
     const t = (2 * Math.PI * i) / half;
     points.push([x0, cyMid + ry * Math.cos(t), cz + rz * Math.sin(t)]);
-    normals.push([side, 0, 0]); // the ear faces outward along the side plane
   }
-  return { points, normals, closed: true };
+  // The ear faces outward along the side plane.
+  return { points, normal: () => [side, 0, 0], closed: true };
 }
 
 /**
@@ -351,7 +355,6 @@ function jaw(side: number, { A, C }: Axes, { noseY }: Proportions): Curve {
   const control: Vec3 = [side * A * 0.72, -B * 0.82, C * 0.42];
   const end: Vec3 = [0, -B * 0.94, C * 0.26]; // the chin, forward of the bottom tip
   const points: Vec3[] = [];
-  const normals: Vec3[] = [];
   const N = 28;
   for (let i = 0; i <= N; i++) {
     const t = i / N;
@@ -362,9 +365,9 @@ function jaw(side: number, { A, C }: Axes, { noseY }: Proportions): Curve {
       u * u * start[2] + 2 * u * t * control[2] + t * t * end[2],
     ];
     points.push(p);
-    normals.push([p[0], p[1] * 0.3, p[2]]); // roughly outward from the form
   }
-  return { points, normals, closed: false };
+  // Roughly outward from the form.
+  return { points, normal: (p) => [p[0], p[1] * 0.3, p[2]], closed: false };
 }
 
 /**
@@ -387,11 +390,9 @@ function fifths(ax: Axes): Curve[] {
  * faces the viewer there.
  */
 function projectCurve(curve: Curve, m: Mat3, { A, C }: Axes): ProjectedPoint[] {
-  const { points, normals } = curve;
-  return points.map((p, i) => {
-    // A curve that supplies normals supplies one per point (ear and jaw push
-    // both in the same loop); a point without one takes the ellipsoid's.
-    const n: Vec3 = normals?.[i] ?? [p[0] / (A * A), p[1] / (B * B), p[2] / (C * C)];
+  const { points, normal } = curve;
+  return points.map((p) => {
+    const n: Vec3 = normal ? normal(p) : [p[0] / (A * A), p[1] / (B * B), p[2] / (C * C)];
     const w = apply(m, p);
     const wn = apply(m, n);
     return { x: w[0], y: w[1], z: w[2], visible: wn[2] > 0 };

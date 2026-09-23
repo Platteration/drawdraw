@@ -103,6 +103,29 @@ describe('buildHeadWireframe', () => {
     expect(wire.back.every((poly) => poly.points.every((p) => !p.visible))).toBe(true);
   });
 
+  it('splits each ear by its own normal, not the ellipsoid it sits on', () => {
+    // An ear is a flat oval facing straight out along its side plane, so at
+    // any pose it is wholly toward the viewer or wholly away: one closed loop
+    // each, solid or dashed, and never both solid. The ellipsoid's normals
+    // turn around the oval and would split it, which is what an ear that ran
+    // out of normals of its own part-way did, with every other test green.
+    const split: string[] = [];
+    for (let yaw = -180; yaw < 180; yaw += 15) {
+      for (let pitch = -30; pitch <= 30; pitch += 10) {
+        for (const roll of [-20, 0, 20]) {
+          const bare = buildHeadWireframe(yaw, pitch, roll, { elements: {} });
+          const eared = buildHeadWireframe(yaw, pitch, roll, { elements: { ears: true } });
+          // The ears are drawn after the two rings every wireframe carries.
+          const front = eared.front.slice(bare.front.length);
+          const back = eared.back.slice(bare.back.length);
+          const whole = front.length + back.length === 2 && [...front, ...back].every((poly) => poly.closed);
+          if (!whole || front.length === 2) split.push(`${yaw}/${pitch}/${roll}`);
+        }
+      }
+    }
+    expect(split).toEqual([]);
+  });
+
   it('treats an omitted element as off rather than defaulting it back on', () => {
     // A caller that filters the element set down — as the free tier does —
     // must get exactly what it asked for.
