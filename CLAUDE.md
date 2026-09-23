@@ -25,7 +25,10 @@ lists the `jest` and `node` types because the tests read the file system;
 line CI runs. `App.tsx`, `index.ts`, everything under `src/` and every test are
 TypeScript (jest matches `*.test.ts` and `*.test.tsx` only); the tools that run
 under plain Node (`tools/`, `e2e/`, `plugins/`, the config files) stay
-JavaScript. Types describe what the code does: no `as` casts, no `any`, no
+JavaScript. Jest's `testTimeout` is 15 s in `package.json`: a suite's first mount of a
+screen (App, HomeScreen, EditorScreen) costs 3-4 s cold, measured here, and CI's
+runner went over the 5 s default in two of them; every other test takes under a
+second. Types describe what the code does: no `as` casts, no `any`, no
 `@ts-ignore` or `@ts-expect-error`, in the tests as well. An index that can miss
 is handled as a miss; a non-null assertion (`!`) is only for an index the code
 beside it has bounded (a loop condition, a remainder, a length check, a
