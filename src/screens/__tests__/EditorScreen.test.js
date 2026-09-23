@@ -6,7 +6,7 @@
  */
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
-import { Alert, BackHandler, PixelRatio, Platform } from 'react-native';
+import { ActivityIndicator, Alert, BackHandler, PixelRatio, Platform, StyleSheet } from 'react-native';
 
 jest.mock('react-native-view-shot', () => ({
   captureRef: jest.fn(async () => 'file:///tmp/export.png'),
@@ -145,6 +145,46 @@ describe('export resolution', () => {
       sizes.push(deliveredPixels({ platform: 'ios', pixelRatio }));
     }
     expect(sizes[0]).toEqual(sizes[1]);
+  });
+});
+
+describe('while an export is being captured', () => {
+  it('dims the whole editor rather than taking a place in its layout', async () => {
+    // React Native 0.86 has no StyleSheet.absoluteFillObject (0.79 did), and
+    // spreading the undefined it reads as leaves the overlay an ordinary flex
+    // child: a band under the export buttons, with the spinner in it, and the
+    // editor above it neither dimmed nor covered. The web build still has the
+    // name, so only a device ever showed it.
+    let finish;
+    captureRef.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const { tree } = await mountEditor();
+    expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
+
+    const [button] = tree.root.findAll((n) => n.props && n.props.label === 'Photo\n+ guide');
+    let pressed;
+    await act(async () => {
+      pressed = button.props.onPress(); // held open until the capture resolves
+    });
+
+    const overlay = tree.root.findByType(ActivityIndicator).parent;
+    expect(StyleSheet.flatten(overlay.props.style)).toMatchObject({
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+    });
+
+    await act(async () => {
+      finish('file:///tmp/export.png');
+      await pressed;
+    });
+    expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
   });
 });
 

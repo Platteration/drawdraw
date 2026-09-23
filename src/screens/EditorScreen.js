@@ -867,7 +867,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   busyOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(46, 42, 38, 0.45)',
