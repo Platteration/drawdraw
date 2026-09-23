@@ -6,9 +6,9 @@ const MAX_EXPORT_DIMENSION = 4096; // the cap EditorScreen clamps exports to
  * What react-native-view-shot does with the size it is handed, stated here
  * from its native code rather than from the module under test — otherwise a
  * broken conversion would be measured against itself and excuse itself.
- * iOS rasterises a point size at the screen scale
- * (UIGraphicsBeginImageContextWithOptions(size, NO, 0), RNViewShot.mm:112);
- * Android and web treat it as pixels.
+ * iOS rasterises a point size at the screen scale (a UIGraphicsImageRenderer
+ * whose format has scale 0, RNViewShot.mm:137-141 in 5.1.0); Android and web
+ * treat it as pixels.
  */
 const delivered = (pixels, { platform, pixelRatio }) => {
   const size = captureSize(pixels, { platform, pixelRatio });
@@ -18,10 +18,9 @@ const delivered = (pixels, { platform, pixelRatio }) => {
 
 describe('captureSize', () => {
   it('hands iOS points, not pixels, so the screen scale cannot multiply the export', () => {
-    // react-native-view-shot opens the drawing context with
-    // UIGraphicsBeginImageContextWithOptions(size, NO, 0): scale 0 means the
-    // main screen's, so a pixel count passed straight through comes back
-    // multiplied by it.
+    // react-native-view-shot renders into a UIGraphicsImageRenderer whose
+    // format has scale 0, which means the main screen's, so a pixel count
+    // passed straight through comes back multiplied by it.
     const photo = { width: 4032, height: 3024 };
     expect(captureSize(photo, { platform: 'ios', pixelRatio: 3 })).toEqual({
       width: 1344,

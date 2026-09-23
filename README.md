@@ -87,10 +87,10 @@ npx expo start
 Scan the QR code with [Expo Go](https://expo.dev/go) on an iOS or Android device. Exports,
 haptics and the share sheet need a real device.
 
-Expo Go ships only the current Expo SDK, and this app is still on SDK 53, so a current
-Expo Go will refuse to open it. Until that upgrade lands, use a development build —
-`npx expo run:ios` or `npx expo run:android` — which is what the exports and the share
-sheet want anyway.
+Expo Go runs one Expo SDK at a time; this app is on SDK 57, the current one when this was
+written. Expo Go carries its own native configuration rather than this app's, so the
+permission strings and the blocked permissions described below only apply to a development
+build — `npx expo run:ios` or `npx expo run:android` — or a store build.
 
 ### Native builds
 
@@ -102,8 +102,9 @@ eas build --platform android
 
 Photo library and camera permission strings are configured in `app.json`, and so
 is everything the build deliberately does *not* ask for. The Expo modules bring
-their own Android manifests — expo-media-library alone declares the whole
-media-read set, images, video, audio and legacy storage — and the prebuild
+their own Android permissions — expo-media-library alone asks for the whole
+media-read set, images, video, audio and legacy storage, through its manifest
+and its config plugin — and the prebuild
 template adds the "display over other apps" overlay; none of it is used by an
 app that only ever writes one PNG, so `android.blockedPermissions` takes it back
 out. What ships is the camera, the vibrator and, on Android 12 and below, write

@@ -1,7 +1,6 @@
 // https://docs.expo.dev/guides/using-eslint/
 // The shared Expo lint configuration (see CONVENTIONS.md): Expo's own preset at the
-// SDK-pinned version, with only the deltas every app here needs. This is the SDK 53
-// form: its preset ships react-hooks v5, which has no React Compiler rules to relax.
+// SDK-pinned version, with only the deltas every app here needs.
 const { defineConfig } = require('eslint/config');
 const expo = require('eslint-config-expo/flat');
 const globals = require('globals');
@@ -15,6 +14,10 @@ module.exports = defineConfig([
   { files: ['**/__tests__/**', '**/*.test.*'], languageOptions: { globals: { ...globals.jest, ...globals.node } } },
   {
     rules: {
+      // React Compiler readiness rules from react-hooks v7; no app here uses the
+      // compiler, so they are advice, not errors.
+      'react-hooks/refs': 'warn',
+      'react-hooks/set-state-in-effect': 'warn',
       // Prose apostrophes in JSX text.
       'react/no-unescaped-entities': 'off',
     },

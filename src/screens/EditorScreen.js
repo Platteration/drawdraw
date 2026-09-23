@@ -13,7 +13,10 @@ import {
   View,
 } from 'react-native';
 import { captureRef, releaseCapture } from 'react-native-view-shot';
-import * as MediaLibrary from 'expo-media-library';
+// The function API this save was written against. Since SDK 56 the package
+// root is the Asset/Album object API, and its saveToLibraryAsync is a stub
+// that throws; the legacy entry point is still the native module it was.
+import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Sharing from 'expo-sharing';
 
 import GuideOverlay from '../components/GuideOverlay';

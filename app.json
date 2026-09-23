@@ -5,7 +5,6 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
-    "newArchEnabled": true,
     "backgroundColor": "#f4efe6",
     "ios": {
       "supportsTablet": true,
@@ -13,7 +12,6 @@
     },
     "android": {
       "package": "com.platteration.drawdraw",
-      "edgeToEdgeEnabled": false,
       "predictiveBackGestureEnabled": false,
       "allowBackup": false,
       "blockedPermissions": [

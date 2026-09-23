@@ -12,7 +12,7 @@ jest.mock('react-native-view-shot', () => ({
   captureRef: jest.fn(async () => 'file:///tmp/export.png'),
   releaseCapture: jest.fn(),
 }));
-jest.mock('expo-media-library', () => ({
+jest.mock('expo-media-library/legacy', () => ({
   requestPermissionsAsync: jest.fn(async () => ({ granted: true })),
   saveToLibraryAsync: jest.fn(async () => {}),
 }));
@@ -28,7 +28,7 @@ jest.mock('expo-haptics', () => ({
 jest.mock('../../lib/storage', () => ({ saveSettings: jest.fn(async () => {}) }));
 
 import { captureRef, releaseCapture } from 'react-native-view-shot';
-import * as MediaLibrary from 'expo-media-library';
+import * as MediaLibrary from 'expo-media-library/legacy';
 import { saveSettings } from '../../lib/storage';
 import HeadGuide from '../../components/HeadGuide';
 import EditorScreen from '../EditorScreen';
@@ -93,7 +93,7 @@ async function press(tree, label) {
 function deliveredPixels({ platform, pixelRatio }) {
   const options = captureRef.mock.calls[captureRef.mock.calls.length - 1][1];
   // iOS reads width/height as points and rasterises at the screen scale
-  // (UIGraphicsBeginImageContextWithOptions(size, NO, 0) in RNViewShot.mm).
+  // (a UIGraphicsImageRenderer with format scale 0, in RNViewShot.mm).
   const scale = platform === 'ios' ? pixelRatio : 1;
   return { width: options.width * scale, height: options.height * scale };
 }

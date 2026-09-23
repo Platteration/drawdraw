@@ -34,8 +34,8 @@ jobs:
 
       - run: npm run test:conventions
 
-      # The Expo CLI refuses an output directory outside the project, so the bundle
-      # lands in .export-check (ignored) rather than /tmp.
+      # The two platforms the app ships to. The bundle lands in .export-check,
+      # which .gitignore and eslint.config.js both leave alone.
       - run: npx expo export --platform ios --platform android --output-dir .export-check
 
       - run: npm run icons:check

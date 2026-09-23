@@ -15,7 +15,10 @@ jest.mock('@react-native-async-storage/async-storage', () => {
   };
 });
 
-jest.mock('expo-file-system', () => ({
+// The legacy entry point is the one storage.js imports: the package root has
+// had the File/Directory API since SDK 54, and its functions of these names
+// throw. A mock of the root would let this suite pass over that.
+jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///docs/',
   getInfoAsync: jest.fn(async () => ({ exists: true })),
   makeDirectoryAsync: jest.fn(async () => {}),
@@ -31,7 +34,7 @@ jest.mock('../projectShape', () => {
 });
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { sanitizeProjects } from '../projectShape';
 import { createProject, deleteProject, listProjects, saveSettings } from '../storage';

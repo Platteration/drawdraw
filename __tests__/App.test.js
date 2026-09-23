@@ -26,15 +26,23 @@ jest.mock('../src/lib/feedback', () => ({
   setHapticsEnabled: jest.fn(),
   haptics: { tap: jest.fn(), snap: jest.fn(), fitted: jest.fn() },
 }));
+// The provider waits for the native side to report the insets before it
+// renders anything, and there is no native side here; the library's own mock
+// reports zero insets at once and leaves SafeAreaView the real component.
+jest.mock('react-native-safe-area-context', () => require('react-native-safe-area-context/jest/mock').default);
 
 import React from 'react';
+import { Modal } from 'react-native';
 import renderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import App from '../App';
 import { setHapticsEnabled } from '../src/lib/feedback';
 import HomeScreen from '../src/screens/HomeScreen';
 import OnboardingScreen from '../src/screens/OnboardingScreen';
+import PaywallScreen from '../src/screens/PaywallScreen';
+import SettingsScreen from '../src/screens/SettingsScreen';
 
 const SETTINGS_KEY = 'drawdraw.settings.v1';
 const ONBOARDED_KEY = 'drawdraw.onboarded.v1'; // what the build before settings wrote
@@ -155,4 +163,50 @@ it('renders the free build for someone who has not bought it', async () => {
   });
 
   expect(tree.root.findByType(HomeScreen).props.pro).toBe(false);
+});
+
+describe('the system bars', () => {
+  // Android draws every app edge to edge from SDK 54 on, and a Modal is a
+  // window of its own that is drawn edge to edge too, so each screen needs a
+  // SafeAreaView between it and the window: the root one for the screens in
+  // the main tree, and one inside each Modal, whose content inherits none of
+  // the root's padding. React Native's own SafeAreaView would pass on iOS and
+  // do nothing on Android, so the type is react-native-safe-area-context's.
+  const nearest = (instance, type) => {
+    for (let node = instance.parent; node; node = node.parent) {
+      if (node.type === type) return node;
+    }
+    return null;
+  };
+  /** The screen's nearest SafeAreaView sits inside the Modal it is shown in. */
+  const insetWithinItsModal = (screen) => {
+    const inset = nearest(screen, SafeAreaView);
+    expect(inset).not.toBeNull();
+    expect(nearest(inset, Modal)).toBe(nearest(screen, Modal));
+    expect(nearest(screen, Modal)).not.toBeNull();
+  };
+
+  beforeEach(async () => {
+    mockReads.set(SETTINGS_KEY, Promise.resolve(SEEN));
+    mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
+    await act(async () => {
+      tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
+    });
+  });
+
+  it('keeps the main screens clear of them', () => {
+    const home = tree.root.findByType(HomeScreen);
+    expect(nearest(home, SafeAreaView)).not.toBeNull();
+    expect(nearest(home, Modal)).toBeNull();
+  });
+
+  it('keeps Settings clear of them, inside its own Modal', async () => {
+    await act(async () => tree.root.findByType(HomeScreen).props.onOpenSettings());
+    insetWithinItsModal(tree.root.findByType(SettingsScreen));
+  });
+
+  it('keeps the paywall clear of them, inside its own Modal', async () => {
+    await act(async () => tree.root.findByType(HomeScreen).props.onRequestPro());
+    insetWithinItsModal(tree.root.findByType(PaywallScreen));
+  });
 });

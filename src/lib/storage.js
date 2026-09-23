@@ -1,5 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as FileSystem from 'expo-file-system';
+// The function API this module was written against. Since SDK 54 the package
+// root exports the File/Directory classes instead, and its functions of these
+// names are stubs that throw — which createProject's catch would quietly turn
+// into every import being ephemeral. The legacy entry point is the same native
+// module and the same documentDirectory, so the copies already on disk and
+// the URIs in the index stay valid.
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { portraitExtension } from './filenames';
 import { hasTraversal, sanitizeProjects } from './projectShape';

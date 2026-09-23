@@ -11,7 +11,7 @@ jest.mock('../purchases', () => ({
   purchases: { purchase: jest.fn(), restore: jest.fn() },
 }));
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import renderer, { act } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -19,8 +19,17 @@ import { purchases } from '../purchases';
 import { useEntitlements } from '../pro';
 
 let entitlements;
-function Probe() {
-  entitlements = useEntitlements();
+const capture = (value) => {
+  entitlements = value;
+};
+/**
+ * Hands the hook's value out from an effect, so nothing outside a component
+ * is written during render (react-hooks/globals); `act` flushes effects, so
+ * every read below still sees the value of the latest render.
+ */
+function Probe({ onValue }) {
+  const value = useEntitlements();
+  useEffect(() => onValue(value), [value, onValue]);
   return null;
 }
 
@@ -29,7 +38,7 @@ let trees = [];
 async function mount() {
   let tree;
   await act(async () => {
-    tree = renderer.create(<Probe />);
+    tree = renderer.create(<Probe onValue={capture} />);
   });
   trees.push(tree);
   return tree;

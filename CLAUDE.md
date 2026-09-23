@@ -33,6 +33,12 @@ before pushing.
   options `react-native-view-shot` actually reads. iOS takes them as points
   and rasterises at the screen scale, so a pixel count there is multiplied by
   the device scale. Pure, tested.
+- `src/lib/storage.js` and `src/screens/EditorScreen.js` import
+  `expo-file-system/legacy` and `expo-media-library/legacy`: since SDK 54 and 56
+  the package roots are object APIs whose functions of the old names are stubs
+  that throw. The unit suites mock native modules wholesale, so
+  `__tests__/nativeApi.test.js` checks every name the app calls on a mocked
+  module against the installed package's own type declarations.
 - `src/lib/projectShape.js` — checks what comes back out of storage. Anything
   that does not hold up is dropped so the caller's own default applies; it
   invents nothing and never completes an element set. Pure, tested.
@@ -78,17 +84,22 @@ default, so the two say the same thing and a default that moves between SDKs
 moves visibly. `expo-system-ui` is what makes `userInterfaceStyle` reach Android
 (its pin is read from `expo/bundledNativeModules.json`, so an SDK upgrade moves
 it); `android.predictiveBackGestureEnabled: false` protects the
-BackHandler-driven screens and has no reader on SDK 53 — it is there for the SDK
-57 upgrade, which also drops `newArchEnabled` and `android.edgeToEdgeEnabled`
-from the schema, so those two assertions flip to `toBeUndefined()` then. The
+BackHandler-driven screens, and SDK 57's prebuild writes it into the manifest as
+`android:enableOnBackInvokedCallback="false"`, which the test reads back.
+`newArchEnabled` and `android.edgeToEdgeEnabled` left the schema in SDK 57 and
+the test holds both absent. Edge-to-edge is mandatory on Android, so every screen
+takes its insets from `react-native-safe-area-context` — React Native's own
+`SafeAreaView` insets on iOS only — and each Modal (Settings, the paywall) carries
+its own `SafeAreaView`, because a Modal is a window of its own and inherits none
+of the root's padding; `__tests__/App.test.js` pins both. The
 adaptive icon is three generated layers (`adaptive-icon.png`,
 `android-icon-background.png`, `android-icon-monochrome.png`) out of
 `tools/make-icons.mjs` — the monochrome layer is the foreground's geometry in
 white because a themed launcher reads only its alpha — and `npm run icons:check`
 plus the pixel checks in the config test keep them honest; never hand-draw one.
 `eas.json` uses `appVersionSource: remote` with `autoIncrement` on production,
-so build numbers live on EAS. `expo export --output-dir` must be inside the
-project (a /tmp path is refused), which is why CI writes to `.export-check`.
+so build numbers live on EAS. CI bundles iOS and Android into `.export-check`,
+which git and the lint config ignore; delete it after a local run.
 
 ## Settings
 

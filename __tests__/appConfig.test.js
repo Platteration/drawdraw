@@ -17,7 +17,7 @@ const zlib = require('zlib');
 const root = path.join(__dirname, '..');
 const appConfig = JSON.parse(fs.readFileSync(path.join(root, 'app.json'), 'utf8')).expo;
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-/** The versions expo@53 ships its modules at, which is what `expo install` pins. */
+/** The versions expo@57 ships its modules at, which is what `expo install` pins. */
 const bundled = JSON.parse(
   fs.readFileSync(path.join(root, 'node_modules/expo/bundledNativeModules.json'), 'utf8')
 );
@@ -150,8 +150,9 @@ describe('permissions requested by the config plugins', () => {
   it('blocks every permission a bundled native module merges in', () => {
     // The generated manifest is only half of it: each native module ships an
     // AndroidManifest.xml that Gradle folds in at build time, which no plugin
-    // option touches. expo-media-library alone declares the whole media-read
-    // set — images, video, audio, user-selected — for an app that only writes.
+    // option touches. expo-media-library asks for the whole media-read set for
+    // an app that only writes — user-selected and legacy storage in its own
+    // manifest, images, video and audio through its plugin (the test above).
     //
     // Every manifest in the tree is read rather than the ones at a guessed
     // path inside a directory whose name starts with 'expo'. A scoped package
@@ -259,14 +260,14 @@ describe('what leaves the device', () => {
     const plugin = require('../plugins/withDebugInternet');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drawdraw-prebuild-'));
     try {
-      // What expo-template-bare-minimum@53.0.42 puts there, verbatim.
+      // What expo-template-bare-minimum@57.0.26 puts there, verbatim.
       const template = [
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android"',
         '    xmlns:tools="http://schemas.android.com/tools">',
         '',
         '    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>',
         '',
-        '    <application android:usesCleartextTraffic="true" tools:targetApi="28" />',
+        '    <application android:usesCleartextTraffic="true" tools:targetApi="28" tools:ignore="GoogleAppIndexingWarning" tools:replace="android:usesCleartextTraffic" />',
         '</manifest>',
         '',
       ].join('\n');
@@ -310,30 +311,32 @@ describe('what leaves the device', () => {
 });
 
 describe('Android system bars', () => {
-  it('does not draw under them while nothing supplies insets', () => {
-    // React Native's SafeAreaView insets on iOS only. With edge-to-edge on and
-    // no inset provider, the Android header and export row end up under the
-    // status bar and the gesture pill.
-    //
-    // SDK 57 drops this key from the schema — Android 16 makes edge-to-edge
-    // mandatory, and its prebuild warns about the key — and `newArchEnabled`
-    // (the next test) leaves with it. Whoever upgrades flips both assertions
-    // to `toBeUndefined()` and gives the screens a safe-area provider, rather
-    // than carrying keys nothing reads.
-    const suppliesInsets = Object.keys(pkg.dependencies).some((d) =>
-      /safe-area/.test(d)
+  it('draws under them, and the app supplies the insets', () => {
+    // Edge-to-edge is unconditional on Android since SDK 54, and SDK 57 drops
+    // the key from the schema: its prebuild warns that Android 16 makes it
+    // mandatory, and no plugin writes it to gradle.properties any more (the
+    // template sets it on itself). So the key is gone and the insets come
+    // from react-native-safe-area-context, at the pin expo@57 bundles. React
+    // Native's own SafeAreaView insets on iOS only, which would put the
+    // Android header and export row under the status bar and the gesture
+    // pill; __tests__/App.test.js holds that every screen, the two in Modals
+    // included, sits inside the library's instead.
+    expect(appConfig.android.edgeToEdgeEnabled).toBeUndefined();
+    expect(gradleProperties['expo.edgeToEdgeEnabled']).toBeUndefined();
+    expect(pkg.dependencies['react-native-safe-area-context']).toBe(
+      bundled['react-native-safe-area-context']
     );
-    if (!suppliesInsets) {
-      expect(appConfig.android.edgeToEdgeEnabled).toBe(false);
-      expect(gradleProperties['expo.edgeToEdgeEnabled']).toBe('false');
-    }
+    expect(appSource()).not.toMatch(/import\s*{[^}]*\bSafeAreaView\b[^}]*}\s*from\s*'react-native'/);
   });
 
-  it('runs on the new architecture, and says so while the SDK still asks', () => {
-    // SDK 53's prebuild writes gradle.properties' newArchEnabled from this
-    // key, so leaving it out is not neutral. Gone in SDK 57 — see above.
-    expect(appConfig.newArchEnabled).toBe(true);
-    expect(gradleProperties.newArchEnabled).toBe('true');
+  it('runs on the new architecture without a key to say so', () => {
+    // SDK 53's prebuild wrote gradle.properties' newArchEnabled from this
+    // key. SDK 57 has no other architecture and no reader for it anywhere
+    // (@expo/cli, config-plugins and prebuild-config alike; the template
+    // states the new architecture itself), so a key left here would be a
+    // decision nothing honours.
+    expect(appConfig.newArchEnabled).toBeUndefined();
+    expect(gradleProperties.newArchEnabled).toBeUndefined();
   });
 });
 
@@ -342,7 +345,7 @@ describe('appearance', () => {
     // `userInterfaceStyle` reaches iOS through the config alone; on Android it
     // needs expo-system-ui installed (@expo/config-types says so on the key).
     // Without it a phone in dark mode inverts an app whose palette is paper
-    // and sanguine. The pin is the one expo@53 bundles, read from expo's own
+    // and sanguine. The pin is the one expo@57 bundles, read from expo's own
     // list rather than typed here, so an SDK upgrade moves it.
     expect(appConfig.userInterfaceStyle).toBe('light');
     expect(pkg.dependencies['expo-system-ui']).toBe(bundled['expo-system-ui']);
@@ -382,12 +385,11 @@ describe('what the sibling apps pin', () => {
   it('keeps predictive back off', () => {
     // EditorScreen and OnboardingScreen answer the back gesture through React
     // Native's BackHandler, which Android 13+ stops delivering once an app
-    // opts into OnBackInvokedCallback. SDK 53's prebuild has no reader for
-    // this key (none in @expo/config-plugins, prebuild-config or @expo/cli)
-    // and its template leaves the gesture off, so today the key is a
-    // statement; SDK 57's prebuild does read it, and this is what keeps the
-    // upgrade from turning the gesture on under those handlers.
+    // opts into OnBackInvokedCallback. SDK 57's prebuild reads this key
+    // (@expo/config-plugins' PredictiveBackGesture) and writes it onto the
+    // application element, so the merge is where the answer is.
     expect(appConfig.android.predictiveBackGestureEnabled).toBe(false);
+    expect(manifest.application[0].$['android:enableOnBackInvokedCallback']).toBe('false');
     expect(appSource()).toMatch(/BackHandler\.addEventListener\('hardwareBackPress'/);
   });
 

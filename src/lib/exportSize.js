@@ -8,12 +8,12 @@
  *   (`Bitmap.createScaledBitmap(bitmap, width, height, true)` in
  *   `android/src/main/java/fr/greweb/reactnativeviewshot/ViewShot.java`).
  * - Web draws into a canvas sized `width` x `height` PIXELS
- *   (`src/RNViewShot.web.js`).
- * - iOS reads them as a `CGSize` in POINTS and opens the drawing context with
- *   `UIGraphicsBeginImageContextWithOptions(size, NO, 0)`
- *   (`ios/RNViewShot.mm:112`). A scale of 0 means "use the main screen's
- *   scale", so the image that comes back is `width * scale` by `height * scale`
- *   PIXELS.
+ *   (`src/RNViewShot.web.ts`).
+ * - iOS reads them as a `CGSize` in POINTS and renders into a
+ *   `UIGraphicsImageRenderer` of that size whose format has `scale = 0`
+ *   (`ios/RNViewShot.mm:137-141` in 5.1.0). A scale of 0 means "use the main
+ *   screen's scale", so the image that comes back is `width * scale` by
+ *   `height * scale` PIXELS.
  *
  * Handing iOS a pixel count therefore multiplies the export by the device
  * scale: a 4032 x 3024 photo on a 3x phone renders 12096 x 9072 — around 110

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Modal, SafeAreaView, StyleSheet } from 'react-native';
+import { Modal, StyleSheet } from 'react-native';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import HomeScreen from './src/screens/HomeScreen';
@@ -54,55 +55,62 @@ export default function App() {
   };
 
   return (
-    // React Native's SafeAreaView only insets on iOS. Android is kept out from
-    // under the status and gesture bars by the system instead, which is why
-    // `android.edgeToEdgeEnabled` is false in app.json: turning it back on
-    // would draw the header and the export row under the system bars, and
-    // nothing in the tree supplies insets to compensate.
-    <SafeAreaView style={styles.root}>
-      <StatusBar style="dark" />
-      {settings === null || !entitlementsRead ? null : !settings.seenIntro || replayingIntro ? (
-        <OnboardingScreen onDone={finishOnboarding} />
-      ) : project ? (
-        <EditorScreen
-          project={project}
-          pro={pro}
-          onRequestPro={() => setPaywall(true)}
-          onClose={() => setProject(null)}
-        />
-      ) : (
-        <HomeScreen
-          onOpenProject={setProject}
-          pro={pro}
-          onRequestPro={() => setPaywall(true)}
-          onReplayIntro={() => setReplayingIntro(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
-        />
-      )}
-
-      {settings && (
-        <Modal
-          visible={settingsOpen}
-          animationType="slide"
-          onRequestClose={() => setSettingsOpen(false)}
-        >
-          <SettingsScreen
-            settings={settings}
-            onChange={updateSettings}
-            onReset={() => updateSettings(resetSettings(settings))}
-            onClose={() => setSettingsOpen(false)}
+    // Android draws every app edge to edge from SDK 54 on, so the insets come
+    // from react-native-safe-area-context on both platforms: React Native's
+    // own SafeAreaView only ever inset on iOS, which left the header and the
+    // export row under Android's status and gesture bars. A Modal is a window
+    // of its own, drawn edge to edge as well, so each one insets its content
+    // again rather than inheriting this view's padding.
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.root}>
+        <StatusBar style="dark" />
+        {settings === null || !entitlementsRead ? null : !settings.seenIntro || replayingIntro ? (
+          <OnboardingScreen onDone={finishOnboarding} />
+        ) : project ? (
+          <EditorScreen
+            project={project}
+            pro={pro}
+            onRequestPro={() => setPaywall(true)}
+            onClose={() => setProject(null)}
           />
-        </Modal>
-      )}
+        ) : (
+          <HomeScreen
+            onOpenProject={setProject}
+            pro={pro}
+            onRequestPro={() => setPaywall(true)}
+            onReplayIntro={() => setReplayingIntro(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        )}
 
-      <Modal visible={paywall} animationType="slide" onRequestClose={() => setPaywall(false)}>
-        <PaywallScreen
-          onClose={() => setPaywall(false)}
-          onPurchase={purchase}
-          onRestore={restore}
-        />
-      </Modal>
-    </SafeAreaView>
+        {settings && (
+          <Modal
+            visible={settingsOpen}
+            animationType="slide"
+            onRequestClose={() => setSettingsOpen(false)}
+          >
+            <SafeAreaView style={styles.root}>
+              <SettingsScreen
+                settings={settings}
+                onChange={updateSettings}
+                onReset={() => updateSettings(resetSettings(settings))}
+                onClose={() => setSettingsOpen(false)}
+              />
+            </SafeAreaView>
+          </Modal>
+        )}
+
+        <Modal visible={paywall} animationType="slide" onRequestClose={() => setPaywall(false)}>
+          <SafeAreaView style={styles.root}>
+            <PaywallScreen
+              onClose={() => setPaywall(false)}
+              onPurchase={purchase}
+              onRestore={restore}
+            />
+          </SafeAreaView>
+        </Modal>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 

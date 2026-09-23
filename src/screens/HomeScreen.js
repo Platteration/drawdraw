@@ -89,11 +89,23 @@ export default function HomeScreen({
   // only the one image the user chose. Asking would grant read access to the
   // whole camera roll for nothing, and a refusal would lock the user out of the
   // app's main entry point with no way back from inside it.
+  //
+  // `automatic` is the iOS representation this import was built on, stated
+  // because expo-image-picker's default moved to `current` in SDK 54, which
+  // keeps the asset in its original container — a HEIC stays a HEIC — where
+  // the picker used to hand over a transcoded copy, and the durable copy is
+  // made from whatever it hands over. Ignored on Android and the web.
   const pickFromLibrary = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      await openAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
+      await openAsset(
+        await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+          preferredAssetRepresentationMode: 'automatic',
+        })
+      );
     } finally {
       setBusy(false);
     }

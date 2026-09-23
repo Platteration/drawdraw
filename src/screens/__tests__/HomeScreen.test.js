@@ -64,6 +64,14 @@ describe('choosing a portrait', () => {
     await pressByLabel('Choose a portrait');
 
     expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledTimes(1);
+    // Stills only, full quality, and on iOS the representation the import was
+    // built on: SDK 54 moved the picker's default from `automatic` to
+    // `current`, which hands over the library's original container instead.
+    expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledWith({
+      mediaTypes: ['images'],
+      quality: 1,
+      preferredAssetRepresentationMode: 'automatic',
+    });
     // The picker runs out of process and returns only the chosen image, so a
     // library grant buys nothing — and refusing it used to lock the user out.
     expect(ImagePicker.requestMediaLibraryPermissionsAsync).not.toHaveBeenCalled();

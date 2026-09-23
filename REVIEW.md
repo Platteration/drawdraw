@@ -18,7 +18,9 @@ All of the following are fixed on `claude/repo-review-security-baiyud`, each wit
 
 `SEC-5`, plus three it raised that this review missed: the Android build declared the whole media-read permission set through the Expo modules' own manifests (`android.blockedPermissions` now takes them back out, and `__tests__/appConfig.test.js` checks the generated manifest rather than app.json); Expo's default had flipped `allowBackup` to true, enrolling the app's own copies of people's faces in cloud backup (now false — see the README); and `sanitizeProject` checked types but not domains, so a tampered index could still reach the renderer as NaN geometry and could point `image.uri` at an `https:` URL the home screen would fetch on every paint. `SUP-1` stays deliberately not done, for the reason in its own entry.
 
-Deliberately not done: `SUP-1`, `BUG-3`. Each was either already covered by an earlier pass, or judged churn or too risky to make without a device or a measurement. The reasoning is in the commit that touched it.
+**Later** — `SUP-1`: Expo SDK 53 to 57 in one step, to the versions every sibling app runs. It crossed three API moves the unit suites could not see, because they mock the modules concerned: expo-file-system's and expo-media-library's package roots became object APIs (storage.js and EditorScreen.js now import the `/legacy` entry points, and `__tests__/nativeApi.test.js` checks the mocked calls against the installed declarations), and the iOS picker's default representation changed (HomeScreen states the old one). Android edge-to-edge became mandatory, so `BUG-6`'s first fix (`edgeToEdgeEnabled: false`) no longer exists to lean on: the insets now come from react-native-safe-area-context, in the Modals too.
+
+Deliberately not done: `BUG-3`. It was either already covered by an earlier pass, or judged churn or too risky to make without a device or a measurement. The reasoning is in the commit that touched it.
 
 An independent reviewer then read each commit and tried to find what was wrong with it, and a second reviewer tried to refute every objection raised. What survived that was fixed in a follow-up commit.
 
@@ -562,8 +564,8 @@ record of what was found, and this block is a record of what was done about it.
 9. Done: every repository has `SECURITY.md`.
 10. Open: the owner's decision; `main` still does not exist. The Pages workflows also
     accept `workflow_dispatch` now, so a deploy can be started by hand from any branch.
-11. Open: drawdraw stays on SDK 53 (presented, not implemented; a store submission would
-    change the call). Node is pinned to 22 in every npm repository through `.nvmrc`.
+11. Done (2026-09-23): drawdraw is on SDK 57 like the other Expo apps, and still in plain
+    JavaScript. Node is pinned to 22 in every npm repository through `.nvmrc`.
 12. Open: a shared package is presented, not implemented. The twins' configuration and
     settings changes land as one identical diff in both, and each carries the other's tests.
 
