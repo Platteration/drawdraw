@@ -34,6 +34,12 @@ import HeadGuide from '../../components/HeadGuide';
 import type { ProjectImage } from '../../lib/projectShape';
 import EditorScreen from '../EditorScreen';
 
+// The first test pays for the editor's first mount: measured at 2.9 s with the suite
+// alone and 3.5 s among the other 23 suites, cold, on a 4-core machine, against
+// Jest's default of 5 s. CI's runner, with the same parallel load, went over it once
+// (run 72) with no change to this code. The later tests take 37-761 ms.
+jest.setTimeout(15_000);
+
 const MAX_EXPORT_DIMENSION = 4096; // EditorScreen's own cap
 const PHOTO = { uri: 'file:///portrait.jpg', width: 4032, height: 3024 }; // a 12MP phone photo
 
