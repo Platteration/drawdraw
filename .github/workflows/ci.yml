@@ -2,61 +2,69 @@ name: CI
 
 on:
   push:
-    branches:
-      - claude/portrait-segmentation-overlay-4kh36c
+    branches: ["**"]
   pull_request:
+  workflow_dispatch:
+  # Weekly, for a tree nobody pushes to: GitHub runs a schedule from the default branch
+  # only, where an advisory or a build that has rotted then shows within a week. Not at
+  # the top of the hour, a high-load time when scheduled runs can be delayed or dropped
+  # (CONVENTIONS.md, "CI").
+  schedule:
+    - cron: "17 6 * * 1"
 
+# A newer run for the same ref supersedes an in-flight one. On the default branch the
+# weekly run shares the group with pushes; whichever is cancelled, the other tests the
+# branch's newest commit.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
-  test:
+  check:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22.13.1
-          cache: npm
-      - run: npm ci
-      # Informative, not a gate. The advisories in this tree sit inside Expo's
-      # own dependencies (uuid via xcode via @expo/config-plugins), which this
-      # project cannot fix, and expo and its CLI are in `dependencies`, so a
-      # blocking audit would fail every PR on the first high advisory upstream.
-      # --omit=dev is not used for the same reason: it would hide nothing of
-      # Expo's and only skip the test tooling.
-      - name: Dependency audit (non-blocking)
-        run: npm audit --audit-level=high
-        continue-on-error: true
-      # Pinned so a new expo-doctor release cannot change what CI checks. Two of
-      # its checks (the app.json schema, fetched from exp.host, and the package
-      # metadata from reactnative.directory) need network and fail spuriously
-      # without it, so this step reports rather than blocks.
-      - name: Expo project health (non-blocking)
-        run: npx expo-doctor@1.20.4
-        continue-on-error: true
-      - name: Unit tests
-        run: npx jest --ci
-      - name: Bundle for iOS and Android
-        run: npx expo export --platform ios --platform android --output-dir .export-check
-      - name: Icons still match the model
-        run: npm run icons:check
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-  e2e:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22.13.1
+          node-version-file: .nvmrc
           cache: npm
+
       - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run test:conventions
+
+      # The two platforms the app ships to. The bundle lands in .export-check,
+      # which .gitignore and eslint.config.js both leave alone.
+      - run: npx expo export --platform ios --platform android --output-dir .export-check
+
+      - run: npm run icons:check
+
       - run: npx playwright install --with-deps chromium
-      - name: Smoke test the app in a browser
-        run: npm run e2e
+
+      - run: npm run test:e2e
+
+  # Its own job, so that an advisory published against an unchanged tree turns audit red
+  # on the next run (on the default branch, the weekly one at the latest) and leaves check
+  # meaning what it always meant. npm audit reads the lockfile: no install.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .nvmrc
+
+      - run: npm audit --omit=dev --audit-level=high

@@ -1,6 +1,7 @@
 # DrawDraw
 
-A portrait-drawing app for iOS and Android, built with [Expo](https://expo.dev) / React Native.
+A portrait-drawing app for iOS and Android, built with [Expo](https://expo.dev) / React Native in
+TypeScript.
 
 Load a portrait and DrawDraw overlays the **three-segment head** — the classic method of
 dividing a face into three equal parts: chin→nose, nose→eyebrows, eyebrows→top of the
@@ -53,7 +54,7 @@ A head turned or tilted away from the viewer foreshortens its segments *unequall
 nose and brow — which sit forward on the curve of the face — swing sideways relative to the
 chin. So three points on the midline carry enough information to recover the pose.
 
-`src/lib/fitSolver.js` searches yaw and pitch coarse-to-fine. At each candidate it solves
+`src/lib/fitSolver.ts` searches yaw and pitch coarse-to-fine. At each candidate it solves
 the remaining unknowns — uniform scale, in-plane rotation, translation — in closed form with
 a similarity Procrustes fit, and keeps the orientation with the smallest residual. Because
 roll is applied last in the rotation and the projection is orthographic, the in-plane
@@ -70,7 +71,7 @@ The method itself, fitting it to a photo, and all three portrait exports are fre
 one-time unlock (not a subscription) covering the full construction head, the child /
 infant / stylized proportion packs, turnaround sheets, and the step-by-step lessons.
 
-Billing is deliberately **not wired up in this repo**. `src/lib/purchases.js` defines the
+Billing is deliberately **not wired up in this repo**. `src/lib/purchases.ts` defines the
 provider interface and ships a `NotConfiguredProvider` that reports honestly rather than
 pretending to charge, so the app builds and runs without a billing SDK. Implementing
 `getProducts` / `purchase` / `restore` against StoreKit or Play Billing (directly or
@@ -87,30 +88,12 @@ npx expo start
 Scan the QR code with [Expo Go](https://expo.dev/go) on an iOS or Android device. Exports,
 haptics and the share sheet need a real device.
 
-## Development
+Expo Go runs one Expo SDK at a time; this app is on SDK 57, the current one when this was
+written. Expo Go carries its own native configuration rather than this app's, so the
+permission strings and the blocked permissions described below only apply to a development
+build — `npx expo run:ios` or `npx expo run:android` — or a store build.
 
-```bash
-npm test          # unit tests for the head model, fit solver and filenames
-npm run e2e       # build for web and drive the app in a real browser
-npm run icons     # regenerate assets/ from the head model
-```
-
-The geometry and solver are pure modules with no React Native imports, so they
-are tested directly: rotation orthonormality, finite output across the full
-sphere of orientations and every proportion preset, hidden-line splitting, the
-two signals the fit reads, and the solver's recovery, noise tolerance and
-refusal of degenerate input. CI runs the tests, bundles for both platforms, and
-checks that `assets/` still matches what the model generates.
-
-Bundling proves the app compiles; `npm run e2e` proves it runs. It builds for
-web, serves it, and drives the real critical path in Chromium — onboarding,
-importing a portrait, fitting the guide with three taps — then reads the
-rendered SVG back and checks where the guide actually landed against a
-synthetic portrait laid out on known thirds. Any console or page error fails
-the run, which is how a runtime break gets caught while bundling still
-succeeds. Web is a test surface rather than a shipping target.
-
-## Building standalone apps
+### Native builds
 
 ```bash
 npm install -g eas-cli
@@ -118,44 +101,110 @@ eas build --platform ios
 eas build --platform android
 ```
 
-Photo library and camera permission strings are configured in `app.json`.
+Photo library and camera permission strings are configured in `app.json`, and so
+is everything the build deliberately does *not* ask for. The Expo modules bring
+their own Android permissions — expo-media-library alone asks for the whole
+media-read set, images, video, audio and legacy storage, through its manifest
+and its config plugin — and the prebuild
+template adds the "display over other apps" overlay; none of it is used by an
+app that only ever writes one PNG, so `android.blockedPermissions` takes it back
+out. What ships is the camera, the vibrator and, on Android 12 and below, write
+access to save an export to Photos. `INTERNET` is blocked with the rest:
+expo-file-system declares it, nothing in `src/` ever opens a socket, and it is
+the one permission that turns a malicious dependency from something that reads
+the app's own documents into something that sends them somewhere. A development
+build does need it — that is how Metro's bundle reaches the device — so
+`plugins/withDebugInternet.js` adds it back at prebuild, to
+`android/app/src/debug/AndroidManifest.xml` alone: the manifest merger gives a
+build-type source set higher priority than the main manifest, and the release
+variant never reads that file. It is the same split React Native's own template
+uses for its debug-only overlay permission.
+
+`android.allowBackup` is off. Expo's default turns it on, which would put the
+app's own full-resolution copies of the portraits into Android Auto Backup and
+within reach of `adb backup` on Android 11 and below. For a photo taken with the
+in-app camera that copy is the only one in existence, so the default is what
+would send a face to a cloud account — from an app that has no network code of
+its own at all. The cost of turning it off is that the portrait list does not
+follow you to a new device. On iOS the documents directory is still covered by
+iCloud backup and there is no Expo API for excluding a file from it, so deleting
+a portrait (hold its thumbnail on the home screen) is what takes it out of the
+next backup.
+
+## Development
+
+```bash
+npm run check     # the gate before a push: lint, type check, unit tests, conventions test
+npm run lint      # eslint, the shared Expo configuration
+npm run typecheck # tsc --noEmit
+npm test          # unit tests: head model, fit solver, storage, entitlements, screens
+npm run test:e2e  # build for web and drive the app in a real browser
+npm run icons     # regenerate assets/ from the head model
+```
+
+The geometry and solver are pure modules with no React Native imports, so they
+are tested directly: rotation orthonormality, finite output across the full
+sphere of orientations and every proportion preset, hidden-line splitting, the
+two signals the fit reads, and the solver's recovery, noise tolerance and
+refusal of degenerate input. CI lints, type-checks, runs the tests and the conventions test,
+bundles for iOS and Android, checks that `assets/` still matches what the model
+generates, and then runs the browser smoke test; a separate job runs
+`npm audit --omit=dev --audit-level=high` against the lockfile.
+
+Bundling proves the app compiles; `npm run test:e2e` proves it runs. It builds for
+web, serves it, and drives the real critical path in Chromium — onboarding,
+importing a portrait, fitting the guide with three taps — then reads the
+rendered SVG back and checks where the guide actually landed against a
+synthetic portrait laid out on known thirds. Any console or page error fails
+the run, which is how a runtime break gets caught while bundling still
+succeeds. Web is a test surface rather than a shipping target.
 
 ## Project layout
 
 ```
-App.js                          Root — onboarding, projects, editor, paywall
-src/theme.js                    Sketchbook palette and type
+App.tsx                          Root — onboarding, projects, editor, paywall
+src/theme.ts                     Sketchbook palette and type
 
-src/lib/headModel.js            3D head: ellipsoid, construction curves,
-                                rotation, orthographic projection, hidden-line
-                                splitting, proportion presets
-src/lib/fitSolver.js            Three-tap pose solver (Procrustes + search)
-src/lib/storage.js              Projects: durable image copies + settings
-src/lib/pro.js                  Entitlements and what each tier includes
-src/lib/purchases.js            Store provider seam
+src/lib/headModel.ts             3D head: ellipsoid, construction curves,
+                                 rotation, orthographic projection, hidden-line
+                                 splitting, proportion presets
+src/lib/fitSolver.ts             Three-tap pose solver (Procrustes + search)
+src/lib/storage.ts               Projects: durable image copies + settings
+src/lib/pro.ts                   Entitlements and what each tier includes
+src/lib/purchases.ts             Store provider seam
+src/lib/settings.ts              Storage keys, the settings record and its validator
+src/lib/settingsStore.ts         Reads and writes it; migrates the old onboarding flag
+src/lib/feedback.ts              Every haptic, behind the Vibration switch
+src/lib/confirm.ts               Confirmations that also work on react-native-web
+src/lib/errors.ts                What a caught error says, for an alert
 
-src/screens/HomeScreen.js       Pick a portrait, reopen recents
-src/screens/EditorScreen.js     The overlay editor and exports
-src/screens/OnboardingScreen.js Three pages teaching the method
-src/screens/PaywallScreen.js    One-time unlock
+src/screens/HomeScreen.tsx       Pick a portrait, reopen recents
+src/screens/EditorScreen.tsx     The overlay editor and exports
+src/screens/OnboardingScreen.tsx Three pages teaching the method
+src/screens/PaywallScreen.tsx    One-time unlock
+src/screens/SettingsScreen.tsx   Vibration, reset to defaults, about
 
-src/components/HeadGuide.js         SVG rendering of the head (screen + export)
-src/components/HeadGestureLayer.js  Rotate / move / pinch / twist, snap haptics
-src/components/FitOverlay.js        Three-tap capture and markers
-src/components/TurnaroundSheet.js   Six-view contact sheet
-src/components/GuideOverlay.js      Flat 2D guide lines
-src/components/DraggableGuide.js    Drag handles for the 2D lines
-src/components/ui.js                Chips, sliders, buttons
+src/components/HeadGuide.tsx         SVG rendering of the head (screen + export)
+src/components/HeadGestureLayer.tsx  Rotate / move / pinch / twist, snap haptics
+src/components/FitOverlay.tsx        Three-tap capture and markers
+src/components/TurnaroundSheet.tsx   Six-view contact sheet
+src/components/GuideOverlay.tsx      Flat 2D guide lines
+src/components/DraggableGuide.tsx    Drag handles for the 2D lines
+src/components/ui.tsx                Chips, sliders, buttons
 
-tools/make-icons.mjs            Renders assets/ from the head model
+plugins/withDebugInternet.js     Config plugin: network access in the debug
+                                 manifest only, never in the release build
+tools/make-icons.mjs             Renders assets/ from the head model
 ```
 
-App icons and the splash mark are generated from `src/lib/headModel.js` rather
+App icons and the splash mark are generated from `src/lib/headModel.ts` rather
 than checked in as opaque art, so the app's mark and its subject cannot drift
 apart. The generator is standard library only — an analytic-coverage line
-rasterizer and a minimal PNG encoder over `node:zlib`.
+rasterizer and a minimal PNG encoder over `node:zlib` — and imports the model
+by its `.ts` name, which Node runs without a build step from 22.18 on (the
+`engines` floor).
 
-The 3D guide has no GL or engine dependency: `headModel.js` rotates and orthographically
+The 3D guide has no GL or engine dependency: `headModel.ts` rotates and orthographically
 projects the head analytically (the silhouette is the projected quadric of the rotated
 ellipsoid), and the result is drawn with `react-native-svg` — which keeps it crisp at export
 resolution and fully capturable in the transparent PNGs. Exports are produced by

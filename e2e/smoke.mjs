@@ -7,13 +7,14 @@
  * against a portrait laid out on known thirds. Anything logged to the console
  * as an error along the way fails the run.
  *
- *   npm run e2e
+ *   npm run test:e2e
  */
-import { createReadStream, existsSync, readdirSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { connect } from 'node:net';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, join } from 'node:path';
+import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
@@ -31,9 +32,33 @@ if (!existsSync(join(BUILD, 'index.html'))) {
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.json': 'application/json', '.png': 'image/png', '.ico': 'image/x-icon' };
 
+/**
+ * The file a request asks for, or the app shell.
+ *
+ * The request path is resolved and then checked to be inside the build
+ * directory, because `join` happily resolves `..` out of it: a raw
+ * `GET /../../../../etc/passwd` (or its `%2e%2e` form — decoding before
+ * resolving is part of it) served any file on the machine for as long as the
+ * run lasted. Anything outside falls through to index.html along with every
+ * other unknown path, so the single-page fallback the app needs is also the
+ * refusal. A malformed escape such as `/%` throws URIError, which would be an
+ * uncaught exception inside a request listener.
+ */
+function fileFor(url) {
+  const shell = join(BUILD, 'index.html');
+  let requested;
+  try {
+    requested = decodeURIComponent(url.split('?')[0]);
+  } catch {
+    return shell;
+  }
+  const file = resolve(BUILD, '.' + normalize(requested));
+  const inside = file === BUILD || file.startsWith(BUILD + sep);
+  return inside && existsSync(file) && statSync(file).isFile() ? file : shell;
+}
+
 const server = createServer((req, res) => {
-  const path = join(BUILD, decodeURIComponent(req.url.split('?')[0]));
-  const file = existsSync(path) && statSync(path).isFile() ? path : join(BUILD, 'index.html');
+  const file = fileFor(req.url);
   res.writeHead(200, { 'Content-Type': TYPES[extname(file)] || 'application/octet-stream' });
   createReadStream(file).pipe(res);
 });
@@ -58,6 +83,29 @@ const check = (label, ok, detail = '') => {
   if (!ok) failures.push(label);
 };
 
+/**
+ * Speak HTTP over a socket, so the request line arrives exactly as written.
+ * A browser — and node's own fetch — normalise `..` away before sending, which
+ * is precisely why the traversal below was never noticed from inside a test.
+ */
+const rawRequest = (line) =>
+  new Promise((done) => {
+    const socket = connect(server.address().port, '127.0.0.1', () =>
+      socket.write(`GET ${line} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n`)
+    );
+    let received = '';
+    socket.setEncoding('utf8');
+    socket.on('data', (chunk) => (received += chunk));
+    socket.on('close', () => done(received));
+    socket.on('error', () => done(''));
+  });
+
+const shell = readFileSync(join(BUILD, 'index.html'), 'utf8');
+for (const line of ['/../../../../etc/passwd', '/%2e%2e/package.json', '/%']) {
+  const body = await rawRequest(line);
+  check(`the server serves nothing above the build directory: ${line}`, body.includes(shell.slice(0, 60)));
+}
+
 const browser = await chromium.launch({ executablePath: findChromium() });
 const page = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
 const consoleErrors = [];
@@ -81,6 +129,12 @@ try {
   await tap('Skip');
   const home = await page.locator('body').innerText();
   check('home screen offers a portrait', home.includes('Choose a portrait'));
+
+  // The dismissal has to be written, or the intro is back on every launch.
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForTimeout(1200);
+  const again = await page.locator('body').innerText();
+  check('the dismissed intro stays dismissed across a reload', !again.includes('Three segments') && again.includes('Choose a portrait'));
 
   const portraitPath = join(mkdtempSync(join(tmpdir(), 'drawdraw-')), 'portrait.png');
   writePortrait(portraitPath);
@@ -155,6 +209,31 @@ try {
   await tap('Jaw'); // a Pro-gated construction line
   const paywall = await page.locator('body').innerText();
   check('a locked control opens the paywall', paywall.includes('Unlock Pro'));
+  // This build's provider sells nothing, so the button carries its words and no
+  // currency amount. (The body text also holds the editor's slider values —
+  // 0.68 and the like — so "digits with two decimals" is not the test here.)
+  const buy = paywall.split('\n').find((line) => line.startsWith('Unlock Pro'));
+  check('the paywall prices nothing it cannot sell', buy === 'Unlock Pro · not available in this build' && !/[$£€¥]\s?\d/.test(paywall), buy || 'no button');
+
+  // Settings, and the confirmation behind Reset. react-native-web's Alert is an
+  // empty stub, so a confirm made through it shows nothing here: the browser
+  // dialog is the only kind this build can raise, and the handler below is
+  // what proves one was.
+  const dialogs = [];
+  page.on('dialog', async (dialog) => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  });
+  await tap('Close');
+  await tap('‹ Portraits');
+  await tap('Settings');
+  const settings = await page.locator('body').innerText();
+  check('settings shows its rows', settings.includes('Vibration') && settings.includes('Reset to defaults'));
+  const version = JSON.parse(readFileSync(join(root, 'app.json'), 'utf8')).expo.version;
+  check('about carries the version from app.json', settings.includes(`DrawDraw ${version}`), `wanted ${version}`);
+  check('about says what stays on the device', settings.includes('Nothing leaves your device'));
+  await tap('Reset to defaults');
+  check('reset asks first, through the browser dialog', dialogs.length === 1 && dialogs[0].startsWith('Reset settings?'), dialogs.join(' | ') || 'no dialog');
 
   check('no console or page errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));
 } finally {

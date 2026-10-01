@@ -12,8 +12,21 @@
     },
     "android": {
       "package": "com.platteration.drawdraw",
+      "predictiveBackGestureEnabled": false,
+      "allowBackup": false,
+      "blockedPermissions": [
+        "android.permission.INTERNET",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png",
         "backgroundColor": "#f4efe6"
       }
     },
@@ -22,7 +35,8 @@
         "expo-image-picker",
         {
           "photosPermission": "DrawDraw needs access to your photos so you can pick a portrait to overlay drawing guides on.",
-          "cameraPermission": "DrawDraw needs camera access so you can take a portrait photo to overlay drawing guides on."
+          "cameraPermission": "DrawDraw needs camera access so you can take a portrait photo to overlay drawing guides on.",
+          "microphonePermission": false
         }
       ],
       [
@@ -32,6 +46,7 @@
           "isAccessMediaLocationEnabled": false
         }
       ],
+      "./plugins/withDebugInternet",
       [
         "expo-splash-screen",
         {
