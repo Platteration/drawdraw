@@ -26,10 +26,19 @@ jest.mock('expo-haptics', () => ({
   NotificationFeedbackType: { Success: 'success' },
 }));
 jest.mock('../../lib/storage', () => ({ saveSettings: jest.fn(async () => {}) }));
+const mockPng = new Blob(['png'], { type: 'image/png' });
+jest.mock('../../lib/webExport', () => ({
+  ...jest.requireActual('../../lib/webExport'),
+  // The renderer gives the off-screen views plain objects, not DOM elements.
+  domElement: jest.fn((node: unknown) => node),
+  renderPng: jest.fn(async () => mockPng),
+  downloadFile: jest.fn(),
+}));
 
 import { captureRef, releaseCapture } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import { saveSettings } from '../../lib/storage';
+import { downloadFile, renderPng } from '../../lib/webExport';
 import HeadGuide from '../../components/HeadGuide';
 import type { ProjectImage } from '../../lib/projectShape';
 import EditorScreen from '../EditorScreen';
@@ -405,5 +414,44 @@ describe('the debounced autosave', () => {
     await act(async () => tree.unmount());
     mounted.length = 0;
     expect(saveSettings).toHaveBeenCalledTimes(1); // no second, duplicate write
+  });
+});
+
+describe('exporting in a browser', () => {
+  const hadWindow = typeof window !== 'undefined';
+  const realAlert = hadWindow ? window.alert : undefined;
+  afterEach(() => {
+    if (hadWindow) Object.defineProperty(window, 'alert', { value: realAlert, configurable: true, writable: true });
+    else Reflect.deleteProperty(globalThis, 'window');
+  });
+
+  it('draws the export at the photo\'s own size and downloads it: no capture, no alert to vanish', async () => {
+    // react-native-view-shot's web capture is html2canvas, which the site's
+    // Trusted Types policy refuses and which stretched the on-screen view up
+    // to the export size; and the "Where do you want it?" alert went through
+    // react-native-web's empty Alert, so an export button did nothing at all.
+    const { tree } = await mountEditor({ platform: 'web', pixelRatio: 2 });
+    await press(tree, 'Photo\n+ guide');
+
+    expect(captureRef).not.toHaveBeenCalled();
+    expect(renderPng).toHaveBeenCalledTimes(1);
+    const [, size] = found(jest.mocked(renderPng).mock.calls[0], 'a render');
+    expect(size).toEqual({ width: PHOTO.width, height: PHOTO.height }); // pixels, not points
+    expect(downloadFile).toHaveBeenCalledWith(mockPng, 'drawdraw-photo-with-guide.png');
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('says so, through the browser dialog, when the export cannot be drawn', async () => {
+    if (!hadWindow) Object.defineProperty(globalThis, 'window', { value: {}, configurable: true, writable: true });
+    const alert = jest.fn();
+    Object.defineProperty(window, 'alert', { value: alert, configurable: true, writable: true });
+    jest.mocked(renderPng).mockRejectedValueOnce(new Error('The export could not be encoded.'));
+    const { tree } = await mountEditor({ platform: 'web', pixelRatio: 2 });
+    await press(tree, 'Guide only\ntransparent');
+
+    expect(downloadFile).not.toHaveBeenCalled();
+    expect(alert).toHaveBeenCalledWith('Export failed\n\nThe export could not be encoded.');
+    // and the editor is usable again
+    expect(tree.root.findAllByType(ActivityIndicator)).toHaveLength(0);
   });
 });

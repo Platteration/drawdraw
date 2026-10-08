@@ -1,7 +1,7 @@
 # DrawDraw
 
-A portrait-drawing app for iOS and Android, built with [Expo](https://expo.dev) / React Native in
-TypeScript.
+A portrait-drawing app for iOS, Android and the web, built with [Expo](https://expo.dev) / React
+Native in TypeScript.
 
 Load a portrait and DrawDraw overlays the **three-segment head** — the classic method of
 dividing a face into three equal parts: chin→nose, nose→eyebrows, eyebrows→top of the
@@ -34,7 +34,8 @@ width and depth; presets cover adult, slim, child, infant and stylized proportio
 hold-to-peek button to check yourself.
 
 **Export layers to draw on.** Every export is a PNG at the photo's own resolution (capped at
-4096px on the long edge), saved to your photo library or sent through the share sheet:
+4096px on the long edge), saved to your photo library or sent through the share sheet — or, in a
+browser, downloaded:
 
 1. **Photo + guide** — the portrait with the construction baked in, for reference.
 2. **Guide only** — the construction alone on a transparent background, to drop over your
@@ -46,7 +47,8 @@ hold-to-peek button to check yourself.
 
 **Pick up where you left off.** Portraits are kept as projects with their full guide setup
 autosaved. Picked images are copied out of the OS cache into the app's documents directory,
-so recents cannot break when the system clears its cache.
+so recents cannot break when the system clears its cache. A browser has no such directory: the
+website keeps your settings, not your portraits, and says so on its home screen.
 
 ## How the fit works
 
@@ -85,8 +87,9 @@ npm install
 npx expo start
 ```
 
-Scan the QR code with [Expo Go](https://expo.dev/go) on an iOS or Android device. Exports,
-haptics and the share sheet need a real device.
+Scan the QR code with [Expo Go](https://expo.dev/go) on an iOS or Android device. Saving to
+Photos, haptics and the share sheet need a real device; `npm run web` runs the website, where an
+export downloads instead and the Vibration row says a browser cannot vibrate.
 
 Expo Go runs one Expo SDK at a time; this app is on SDK 57, the current one when this was
 written. Expo Go carries its own native configuration rather than this app's, so the
@@ -131,6 +134,75 @@ iCloud backup and there is no Expo API for excluding a file from it, so deleting
 a portrait (hold its thumbnail on the home screen) is what takes it out of the
 next backup.
 
+### Deploy
+
+DrawDraw is also a website: the same app, exported for the browser, with everything still on
+the visitor's device. The photo is read by the browser, never uploaded, and the page opens no
+connection of its own (`connect-src 'none'`).
+
+```bash
+npm run build:web                          # a site for the root of its own domain, in .web-build/
+npm run build:web -- --base-url /drawdraw  # a site served under /drawdraw/ (a GitHub Pages project site)
+```
+
+`scripts/build-web.mjs` runs `expo export --platform web`, which copies `public/` into the site
+and fills in `public/index.html`; then it writes the Content-Security-Policy and the referrer
+policy into every page as `<meta>` tags, points the pages' addresses at the base path, removes
+Expo's `metadata.json`, and refuses a site in which a page names a file it does not hold.
+**Publish the contents of `.web-build/`, never the checkout.** The site is exactly `index.html`,
+`404.html`, `guard.js`, `site.css`, `favicon.ico`, `robots.txt`, `.well-known/security.txt` and
+the content-hashed bundle under `_expo/static/`, plus the config file for your host:
+
+| Host | Reads | Notes |
+| --- | --- | --- |
+| Netlify, Cloudflare Pages | `_headers`, `_redirects` | Publish `.web-build/`. Netlify refuses `.htaccess` through `_redirects`; Cloudflare Pages has no 404 rule and serves it as a file (nothing in it is not already public here). |
+| Apache 2.4 | `.htaccess` | Needs `mod_rewrite`, `mod_headers` and `AllowOverride FileInfo Options`. |
+| nginx | `deploy/nginx.conf` | Copy it into the server's config, set `server_name`, `root` and the certificate paths. Written for a domain root. |
+| GitHub Pages | nothing | Sends no headers of its own choosing: only the `<meta>` policy applies (not `frame-ancestors`, which a `<meta>` cannot carry), and HSTS, nosniff, the framing refusal, the Permissions-Policy and COOP/CORP do not. Build with `--base-url /<repo>`. |
+
+The headers, the same in `public/_headers`, `public/.htaccess` and `deploy/nginx.conf`
+(`__tests__/website.test.ts` fails when they are not):
+
+| Header | Value | Why |
+| --- | --- | --- |
+| `Content-Security-Policy` | `default-src 'none'; script-src 'self'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'` | Only the site's own script and stylesheet run. The one hash is that of an *empty* string: react-native-web creates one empty `<style>` and fills it through the CSSOM, and without the hash Chromium refuses it and the layout collapses; no `'unsafe-inline'`. `blob:` is the portrait the file picker hands over and the guide redrawn for an export. No connection of any kind, and Trusted Types, under which React and react-native-web run. Every source was measured in Chromium with the policy sent as a header, and `npm run test:e2e` fails on any violation. |
+| `X-Frame-Options` | `DENY` | With `frame-ancestors 'none'`: the app is not meant to be embedded. |
+| `X-Content-Type-Options` | `nosniff` | Files are what their type says. |
+| `Referrer-Policy` | `no-referrer` | The site makes no cross-origin request, and the one outbound link (the source) gains nothing from one. |
+| `Permissions-Policy` | 51 features denied (`=()`): camera, microphone, geolocation, the motion sensors, clipboard, payment, USB, serial, HID, screen capture, fullscreen, and the advertising, storage-sharing and on-device AI APIs | The app uses none of them. "Take a photo" in a browser is the file picker's own capture, not the camera API. Every name is one Chromium 141 recognises (an unknown one is a console warning), except `web-share`, which Chromium recognises only where it supports sharing. |
+| `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy` | `same-origin` | No other window reaches this one; no other site embeds its files. |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Browsers remember to use HTTPS. Apache and nginx also redirect plain HTTP. |
+| `Cache-Control` | a year, `immutable`, for `_expo/static/`; `no-cache` for every other file | The bundle's name is a hash of its contents; every other name stays the same across builds, so it is revalidated on every load. |
+
+Apache and nginx serve the site's files and nothing else: a dotfile, a host config, a folder
+listing or a repository file copied up by mistake is answered with the site's own `404.html`,
+which needs no script. `guard.js`, loaded before the bundle, is the safety net: a bundle that
+fails to load, is refused or throws before the app draws shows "DrawDraw has not started"
+instead of a blank page, and an app that stops after starting says so. With JavaScript off, a
+`<noscript>` note says what is needed.
+
+**One origin per app.** Browser storage is per origin. A GitHub Pages project site shares
+`<user>.github.io` with every other site the account publishes, so their pages can read and
+write each other's storage. DrawDraw keeps only its settings and the Pro flag there, under keys
+prefixed `drawdraw.`, and reads both through validators, but give the site a domain or
+subdomain of its own. On the web the Pro flag is a record the visitor can edit: this build sells
+nothing, and a store wired up on the web would need a server to check purchases.
+
+**Launch checklist**, with `SITE` the https address:
+
+```sh
+curl -sI http://SITE/ | head -1                       # a 301 to https (Apache, nginx)
+curl -sI https://SITE/ | grep -iE 'content-security|strict-transport|nosniff|x-frame|referrer|permissions|cache-control'
+curl -sI https://SITE/.htaccess | head -1             # 404
+curl -sI https://SITE/_expo/ | head -1                # 404, not a listing
+curl -sI https://SITE/nonexistent | head -1           # 404, the site's own page
+curl -s  https://SITE/.well-known/security.txt        # the contact, and an Expires date in the future
+```
+
+Then open the site, choose a portrait, fit it, export a layer, and check that the console shows
+no `Content Security Policy` line. `.well-known/security.txt` expires on 8 October 2027; the
+unit tests fail once it has, or if it is ever set more than a year ahead.
+
 ## Development
 
 ```bash
@@ -148,16 +220,21 @@ sphere of orientations and every proportion preset, hidden-line splitting, the
 two signals the fit reads, and the solver's recovery, noise tolerance and
 refusal of degenerate input. CI lints, type-checks, runs the tests and the conventions test,
 bundles for iOS and Android, checks that `assets/` still matches what the model
-generates, and then runs the browser smoke test; a separate job runs
+generates, and then runs the browser test of the website; a separate job runs
 `npm audit --omit=dev --audit-level=high` against the lockfile.
 
-Bundling proves the app compiles; `npm run test:e2e` proves it runs. It builds for
-web, serves it, and drives the real critical path in Chromium — onboarding,
-importing a portrait, fitting the guide with three taps — then reads the
-rendered SVG back and checks where the guide actually landed against a
-synthetic portrait laid out on known thirds. Any console or page error fails
-the run, which is how a runtime break gets caught while bundling still
-succeeds. Web is a test surface rather than a shipping target.
+Bundling proves the app compiles; `npm run test:e2e` proves the website runs. It
+builds the site for `/drawdraw/`, serves it from a host that sends the headers
+exactly as `public/_headers` writes them, and drives the real critical path in
+Chromium under that policy — onboarding, importing a portrait, fitting the guide
+with three taps, every export downloaded and read back pixel by pixel, the
+paywall and Settings — then checks where the guide actually landed against a
+synthetic portrait laid out on known thirds. Any policy violation, console or
+page error, or request outside the site fails the run, which is how a runtime
+break, or a policy that blocks something real, gets caught while bundling still
+succeeds. It also checks the 404 page, the safety net with the bundle blocked,
+the page with JavaScript off, and the files a host must not serve. The web is a
+shipping target as well as the device stand-in for CI.
 
 ## Project layout
 
@@ -195,6 +272,16 @@ src/components/ui.tsx                Chips, sliders, buttons
 plugins/withDebugInternet.js     Config plugin: network access in the debug
                                  manifest only, never in the release build
 tools/make-icons.mjs             Renders assets/ from the head model
+
+src/lib/webExport.ts             Exports in a browser: drawn at full size, downloaded
+app.config.js                    The website's base path, for a sub-path build
+scripts/build-web.mjs            Builds the website: the export plus the hosting layer
+public/                          Copied into the site: the page template, site.css,
+                                 guard.js (the safety net), 404.html, robots.txt,
+                                 .well-known/security.txt, and the host configs
+                                 (_headers, _redirects, .htaccess)
+deploy/nginx.conf                The same headers and rules for nginx
+e2e/smoke.mjs, e2e/host.mjs      The website, served as _headers says, driven in Chromium
 ```
 
 App icons and the splash mark are generated from `src/lib/headModel.ts` rather

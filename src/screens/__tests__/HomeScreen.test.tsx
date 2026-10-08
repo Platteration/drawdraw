@@ -213,3 +213,43 @@ describe('a portrait that could not be copied anywhere durable', () => {
     expect(Alert.alert).not.toHaveBeenCalled();
   });
 });
+
+describe('in a browser', () => {
+  /** Every string the screen renders, as one. */
+  const text = (tree: ReactTestRenderer) =>
+    tree.root
+      .findAllByType(Text)
+      .map((t) => [].concat(t.props.children).join(''))
+      .join('\n');
+
+  it('says once, on the screen, that portraits are not kept, and not again on every import', async () => {
+    // expo-file-system has no file system to copy into on the web, so every
+    // import there is ephemeral: an alert on each one would be noise, and
+    // through Alert.alert it was not even shown.
+    Platform.OS = 'web';
+    onAPage();
+    // The test environment's window has no alert of its own to put back.
+    const alert = jest.fn();
+    Object.defineProperty(window, 'alert', { value: alert, configurable: true, writable: true });
+    const asset = { uri: 'blob:http://site/1', width: 100, height: 200 };
+    jest.mocked(ImagePicker.launchImageLibraryAsync).mockResolvedValueOnce({ canceled: false, assets: [asset] });
+    jest
+      .mocked(createProject)
+      .mockResolvedValueOnce({ id: 'p1', updatedAt: 0, image: asset, settings: null, ephemeral: true });
+
+    const { tree, onOpenProject, pressByLabel } = await mount();
+    expect(text(tree)).toContain('In a browser, DrawDraw keeps your settings but not your portraits');
+    await pressByLabel('Choose a portrait');
+
+    expect(onOpenProject).toHaveBeenCalledTimes(1);
+    expect(alert).not.toHaveBeenCalled();
+    expect(Alert.alert).not.toHaveBeenCalled();
+    Reflect.deleteProperty(window, 'alert');
+  });
+
+  it('is not said on a device, where portraits are kept', async () => {
+    Platform.OS = 'ios';
+    const { tree } = await mount();
+    expect(text(tree)).not.toContain('In a browser');
+  });
+});

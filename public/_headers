@@ -1,0 +1,63 @@
+# Response headers for Netlify and Cloudflare Pages, which read this file from the published
+# folder (and do not serve it). Apache: .htaccess. nginx: deploy/nginx.conf. The values are the same
+# in all three, and __tests__/website.test.ts fails when they are not; scripts/build-web.mjs also
+# writes the policy and the referrer policy into every page as <meta> tags, for a host that sends
+# no headers at all (GitHub Pages).
+#
+# Content-Security-Policy, measured in Chromium with the policy sent as this header
+# (npm run test:e2e drives the whole app under it and fails on any violation):
+#   script-src 'self'   the bundle and guard.js. No inline script, no eval.
+#   style-src 'self'    site.css. The hash is that of an EMPTY string: react-native-web creates
+#                       one empty <style> element and fills it through the CSSOM (insertRule),
+#                       which the policy does not govern. Only an empty inline style is allowed;
+#                       no 'unsafe-inline'.
+#   img-src 'self' blob:  the favicon; the portrait, which the browser's file picker hands over as
+#                       a blob: URL; and the guide redrawn for an export (src/lib/webExport.ts).
+#   connect-src 'none'  the app opens no connection of any kind.
+#   frame-ancestors 'none' with X-Frame-Options: DENY: the app is not meant to be embedded.
+#   require-trusted-types-for 'script'; trusted-types 'none': no string reaches an HTML or script
+#                       sink; react-native-web and React run under it.
+# Everything else (fonts, media, workers, frames, the manifest) falls to default-src 'none'.
+#
+# Referrer-Policy is no-referrer: the site makes no cross-origin request, and the one outbound
+# link (the source code) gains nothing from one. Permissions-Policy denies every powerful feature,
+# none of which the app uses: "Take a photo" is the file picker's own capture, not getUserMedia.
+# Every name is one Chromium 141 recognises (an unknown one is a console warning), except
+# web-share, which it recognises only on platforms where it can share.
+#
+# Hosting configs are written for a site at the root of its domain. A sub-path build
+# (--base-url) is for GitHub Pages, which reads none of them.
+
+/*
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: accelerometer=(), attribution-reporting=(), autoplay=(), browsing-topics=(), camera=(), captured-surface-control=(), clipboard-read=(), clipboard-write=(), compute-pressure=(), deferred-fetch=(), deferred-fetch-minimal=(), digital-credentials-get=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), join-ad-interest-group=(), keyboard-map=(), language-detector=(), local-fonts=(), local-network-access=(), magnetometer=(), microphone=(), midi=(), on-device-speech-recognition=(), otp-credentials=(), payment=(), picture-in-picture=(), private-aggregation=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), storage-access=(), summarizer=(), sync-xhr=(), translator=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+
+# The bundle's name carries a hash of its contents: a new build is a new file.
+/_expo/static/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Every other file keeps its name across builds, so it is revalidated on every load (an unchanged
+# file costs a 304) and a deploy can never pair a new page with an old safety net.
+/
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+/404.html
+  Cache-Control: no-cache
+/guard.js
+  Cache-Control: no-cache
+/site.css
+  Cache-Control: no-cache
+/favicon.ico
+  Cache-Control: no-cache
+/robots.txt
+  Cache-Control: no-cache
+/.well-known/security.txt
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: no-cache

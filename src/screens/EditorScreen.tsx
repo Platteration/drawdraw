@@ -45,12 +45,14 @@ import {
   type Point2,
   type Proportions,
 } from '../lib/headModel';
+import { notify } from '../lib/confirm';
 import { errorText } from '../lib/errors';
 import { captureSize } from '../lib/exportSize';
 import { haptics } from '../lib/feedback';
 import type { Project, ProjectSettings } from '../lib/projectShape';
 import { saveSettings } from '../lib/storage';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
+import { domElement, downloadFile, exportFileName, renderPng } from '../lib/webExport';
 
 type Mode = 'rotate' | 'move' | 'lines' | 'fit';
 type Panel = 'guide' | 'build' | 'style';
@@ -294,7 +296,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
       setHeadTransform(solved);
       haptics.fitted();
     } else {
-      Alert.alert(
+      notify(
         'Could not fit',
         'Those three points were too close together to read a pose. Try again, tapping the chin, the base of the nose, and the brow.'
       );
@@ -306,6 +308,21 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const exportView = async (ref: React.RefObject<View | null>, name: string, size: Size) => {
     if (busy || !ref.current) return;
     setBusy(true);
+    // A browser has no photo library and no share sheet to offer, and
+    // react-native-view-shot's web capture cannot run under the site's policy
+    // (src/lib/webExport.ts): the export is drawn here and downloaded.
+    if (Platform.OS === 'web') {
+      try {
+        const element = domElement(ref.current);
+        if (!element) throw new Error('This export view is not on the page.');
+        downloadFile(await renderPng(element, size), exportFileName(name));
+      } catch (err) {
+        notify('Export failed', errorText(err));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
     try {
       const uri = await captureRef(ref, {
         format: 'png',
@@ -322,7 +339,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
       const release = () => {
         if (released) return;
         released = true;
-        // The web shim has no temp file and throws if asked to release one.
+        // A device's capture only; the web downloads above and never comes
+        // here. A release that throws must still let the dialog finish.
         try {
           releaseCapture(uri);
         } catch {}
@@ -379,7 +397,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         { onDismiss: release }
       );
     } catch (err) {
-      Alert.alert('Export failed', errorText(err));
+      notify('Export failed', errorText(err));
     } finally {
       setBusy(false);
     }

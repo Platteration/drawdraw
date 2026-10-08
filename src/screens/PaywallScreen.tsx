@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
+import { notify } from '../lib/confirm';
 import { errorCode, errorText } from '../lib/errors';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS, type ElementSet, type Polyline } from '../lib/headModel';
 import { FREE_FEATURES, PRO_FEATURES } from '../lib/pro';
@@ -84,7 +85,7 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }: Paywal
       await action();
       onClose();
     } catch (err) {
-      Alert.alert(errorCode(err) === 'not_configured' ? 'Not available yet' : `${label} failed`, errorText(err));
+      notify(errorCode(err) === 'not_configured' ? 'Not available yet' : `${label} failed`, errorText(err));
     } finally {
       setBusy(false);
     }

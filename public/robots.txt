@@ -1,0 +1,3 @@
+# DrawDraw: a single-page app. Everything public is the one page.
+User-agent: *
+Allow: /

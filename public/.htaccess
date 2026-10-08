@@ -1,0 +1,46 @@
+# DrawDraw: Apache 2.4 settings for the website (mod_rewrite, mod_headers). Netlify and Cloudflare
+# Pages read _headers instead; nginx: deploy/nginx.conf. The values are the same in all three, and
+# __tests__/website.test.ts fails when they are not. Apache needs AllowOverride FileInfo Options
+# for this file to apply. scripts/build-web.mjs points the ErrorDocument lines at the base path.
+
+Options -Indexes
+ServerSignature Off
+AddDefaultCharset utf-8
+ErrorDocument 404 /404.html
+ErrorDocument 403 /404.html
+
+<IfModule mod_mime.c>
+  AddType text/javascript .js
+  AddType text/css .css
+  AddType image/x-icon .ico
+</IfModule>
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  # Everything over HTTPS.
+  RewriteCond %{HTTPS} !=on
+  RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+  RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+  # The site is exactly these files (the empty path is the page itself). Everything else is a
+  # 404: dotfiles, these configs, a folder that would list, and anything of the repository's that
+  # was copied up by mistake.
+  RewriteRule !^(index\.html|404\.html|guard\.js|site\.css|favicon\.ico|robots\.txt|\.well-known/security\.txt|_expo/static/[A-Za-z0-9/_.-]*[A-Za-z0-9_.-])?$ - [R=404,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+  Header always set Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'"
+  Header always set X-Content-Type-Options "nosniff"
+  Header always set X-Frame-Options "DENY"
+  Header always set Referrer-Policy "no-referrer"
+  Header always set Permissions-Policy "accelerometer=(), attribution-reporting=(), autoplay=(), browsing-topics=(), camera=(), captured-surface-control=(), clipboard-read=(), clipboard-write=(), compute-pressure=(), deferred-fetch=(), deferred-fetch-minimal=(), digital-credentials-get=(), display-capture=(), encrypted-media=(), fullscreen=(), gamepad=(), geolocation=(), gyroscope=(), hid=(), identity-credentials-get=(), idle-detection=(), join-ad-interest-group=(), keyboard-map=(), language-detector=(), local-fonts=(), local-network-access=(), magnetometer=(), microphone=(), midi=(), on-device-speech-recognition=(), otp-credentials=(), payment=(), picture-in-picture=(), private-aggregation=(), private-state-token-issuance=(), private-state-token-redemption=(), publickey-credentials-create=(), publickey-credentials-get=(), run-ad-auction=(), screen-wake-lock=(), serial=(), shared-storage=(), shared-storage-select-url=(), storage-access=(), summarizer=(), sync-xhr=(), translator=(), usb=(), web-share=(), window-management=(), xr-spatial-tracking=()"
+  Header always set Cross-Origin-Opener-Policy "same-origin"
+  Header always set Cross-Origin-Resource-Policy "same-origin"
+  Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains" env=HTTPS
+  # The bundle's name carries a hash of its contents; every other file keeps its name across builds.
+  <If "%{REQUEST_URI} =~ m#/_expo/static/#">
+    Header always set Cache-Control "public, max-age=31536000, immutable"
+  </If>
+  <Else>
+    Header always set Cache-Control "no-cache"
+  </Else>
+</IfModule>

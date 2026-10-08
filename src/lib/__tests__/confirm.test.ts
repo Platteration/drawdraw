@@ -6,11 +6,12 @@
  */
 import { Alert, Platform } from 'react-native';
 
-import { confirmAction } from '../confirm';
+import { confirmAction, notify } from '../confirm';
 
 const realOS = Platform.OS;
 const hadWindow = typeof window !== 'undefined';
 const realConfirm = hadWindow ? window.confirm : undefined;
+const realAlert = hadWindow ? window.alert : undefined;
 
 /**
  * Puts `value` where a page's confirm would be. The DOM types say a window
@@ -19,6 +20,9 @@ const realConfirm = hadWindow ? window.confirm : undefined;
  */
 const setConfirm = (value: unknown) =>
   Object.defineProperty(window, 'confirm', { value, configurable: true, writable: true });
+/** The same for the page's alert. */
+const setAlert = (value: unknown) =>
+  Object.defineProperty(window, 'alert', { value, configurable: true, writable: true });
 
 /** A stand-in for the browser dialog that answers `answer`. */
 const dialog = (answer: boolean) => {
@@ -44,8 +48,10 @@ beforeEach(() => {
 afterEach(() => {
   Platform.OS = realOS;
   jest.restoreAllMocks();
-  if (hadWindow) setConfirm(realConfirm);
-  else Reflect.deleteProperty(globalThis, 'window');
+  if (hadWindow) {
+    setConfirm(realConfirm);
+    setAlert(realAlert);
+  } else Reflect.deleteProperty(globalThis, 'window');
 });
 
 describe('on the web', () => {
@@ -87,5 +93,24 @@ describe('on a device', () => {
     expect(onConfirm).not.toHaveBeenCalled(); // nothing runs until the button is pressed
     buttons[1]!.onPress?.(); // two buttons, above
     expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('a message', () => {
+  it('reaches the browser dialog on the web, where Alert.alert would show nothing', () => {
+    Platform.OS = 'web';
+    const alert = jest.fn((_message?: string) => {});
+    setAlert(alert);
+    notify('Export failed', 'The export could not be encoded.');
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(alert.mock.calls[0]![0]).toBe('Export failed\n\nThe export could not be encoded.'); // called once, above
+    expect(Alert.alert).not.toHaveBeenCalled();
+  });
+
+  it('is a one-button alert on a device', () => {
+    Platform.OS = 'android';
+    notify('Export failed', 'The export could not be encoded.');
+    expect(Alert.alert).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).toHaveBeenCalledWith('Export failed', 'The export could not be encoded.');
   });
 });

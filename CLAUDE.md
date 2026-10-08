@@ -2,9 +2,9 @@
 
 Read AGENTS.md first. It holds the working rules every coding agent follows in this repository; this file adds the notes specific to this project.
 
-Expo / React Native app (iOS + Android), in TypeScript, that overlays a
-rotatable 3D three-segment construction head on a portrait photo and exports
-drawing layers.
+Expo / React Native app (iOS, Android and a website), in TypeScript, that
+overlays a rotatable 3D three-segment construction head on a portrait photo and
+exports drawing layers.
 See README.md for what it does and how the pose fit works.
 
 ## Commands
@@ -17,7 +17,8 @@ npm run lint            # eslint, the shared Expo configuration
 npm run typecheck       # tsc --noEmit: strict, with noUncheckedIndexedAccess
 npm test                # jest, via the jest-expo preset
 npm run icons           # regenerate assets/ from the head model
-npm run test:e2e        # build for web and drive the app in a browser
+npm run build:web       # the website in .web-build/ (-- --base-url /drawdraw for a sub-path)
+npm run test:e2e        # build the website for /drawdraw/ and drive it in a browser under its policy
 npx expo export --platform ios --platform android --output-dir .export-check
 ```
 
@@ -26,8 +27,8 @@ lists the `jest` and `node` types because the tests read the file system;
 `@types/node` is a devDependency for that reason only, pinned to the Node 22
 line CI runs. `App.tsx`, `index.ts`, everything under `src/` and every test are
 TypeScript (jest matches `*.test.ts` and `*.test.tsx` only); the tools that run
-under plain Node (`tools/`, `e2e/`, `plugins/`, the config files) stay
-JavaScript. Jest's `testTimeout` is 15 s in `package.json`: a suite's first mount of a
+under plain Node (`tools/`, `e2e/`, `plugins/`, `scripts/`, the config files) and
+the website's own `public/guard.js` stay JavaScript. Jest's `testTimeout` is 15 s in `package.json`: a suite's first mount of a
 screen (App, HomeScreen, EditorScreen) costs 3-4 s cold, measured here, and CI's
 runner went over the 5 s default in two of them; every other test takes under a
 second. Types describe what the code does: no `as` casts, no `any`, no
@@ -48,8 +49,8 @@ and its test drives those.
 
 `npx expo export` is the fastest way to confirm a change still compiles for both
 platforms. `npm run test:e2e` is how to confirm it actually *runs*: there is no
-device in CI, so the web build stands in for one. Run both (and `npm run check`)
-before pushing.
+device in CI, so the website stands in for one, and is tested as the website it
+also is. Run both (and `npm run check`) before pushing.
 
 ## Where things live
 
@@ -94,8 +95,36 @@ before pushing.
   imports nothing.
 - `e2e/smoke.mjs` — drives the real critical path in a browser and measures
   where the three-tap fit actually lands, against a synthetic portrait laid out
-  on known thirds (`e2e/portrait.mjs`). It fails on any console or page error,
-  which is how a runtime break gets caught when bundling still succeeds.
+  on known thirds (`e2e/portrait.mjs`), then downloads every free export and
+  reads its pixels back. `e2e/host.mjs` serves the built site at `/drawdraw/`
+  with the headers exactly as `public/_headers` writes them. It fails on any
+  policy violation, console or page error, or request outside the site, which
+  is how a runtime break — or a policy that blocks something real — gets caught
+  when bundling still succeeds.
+- The website. `scripts/build-web.mjs` runs `expo export --platform web`, which
+  copies `public/` into the site and fills in `public/index.html` (SDK 57's
+  single-output template: no inline script or style, `guard.js` first); then it
+  adds the policy as `<meta>` tags from `public/_headers`, points root-absolute
+  addresses at the base path (`app.config.js` hands Expo that path as
+  `experiments.baseUrl`, only when `WEB_BASE_URL` is set, so app.json is read as
+  written everywhere else), and checks every page reference resolves. The
+  policy is in four places — `public/_headers`, `public/.htaccess`,
+  `deploy/nginx.conf`, and the built pages' `<meta>` — and
+  `__tests__/website.test.ts` holds them equal, along with the allow-list of
+  site files Apache and nginx serve (everything else is a 404). Every source in
+  the policy was measured in Chromium with the policy as a header: the one
+  `style-src` hash is the empty string's, for react-native-web's empty
+  `<style>` that it fills through the CSSOM (refused, the layout collapses);
+  `img-src blob:` is the picked portrait and the export's redrawn SVG. A new
+  file the site loads goes in the allow-lists and the `_headers` cache rules,
+  and the test fails until it does.
+- `src/lib/webExport.ts` — exports in a browser. react-native-view-shot's web
+  capture is html2canvas, which writes its copy of the page with
+  `document.write` (refused under the site's Trusted Types) and stretches the
+  on-screen view to the export size; this draws the export view's photo, flat
+  lines, SVG and text onto a canvas at full size and downloads it. Anything new
+  drawn into an export view has to be one of those four kinds, or the web
+  export leaves it out: the e2e reads the exported pixels back to catch that.
 
 ## Rules of this codebase
 
@@ -111,9 +140,16 @@ before pushing.
   Exports always render at full quality.
 - Free features are never watermarked, and there are no ads or consumables.
   New paid surface goes behind `pro` in `src/lib/pro.ts`.
-- Web is a test surface, not a shipping target, but it has to stay working
-  because the smoke test rides on it. Prefer a dependency that behaves the same
-  on all three platforms over one that needs a web special case.
+- The web is a shipping target (a website) as well as the device stand-in the
+  e2e rides on. Prefer a dependency that behaves the same on all three
+  platforms over one that needs a web special case. What a browser cannot do
+  says so on the page rather than leaving a dead control: messages go through
+  `notify` in `src/lib/confirm.ts` (react-native-web's `Alert.alert` is an
+  empty stub, so a message through it is never seen), the home screen says a
+  browser keeps settings but not portraits, and the Vibration row is disabled
+  with its reason. Nothing may add an inline script, an inline style, a
+  connection or a third-party file to the page: the policy refuses them and the
+  e2e fails.
 
 ## Native configuration
 
@@ -159,9 +195,9 @@ record before the first frame, gates every haptic through `setHapticsEnabled` in
 `src/lib/feedback.ts` (no call site touches `expo-haptics` directly), and shows
 `SettingsScreen` in a Modal from the home screen's footer. Reset to defaults is confirmed and
 touches the settings record alone — never projects, Pro or `seenIntro`, which records what
-was shown rather than a preference. Confirmations go through `src/lib/confirm.ts`, because
-react-native-web's `Alert.alert` is an empty stub and a two-button confirm through it did
-nothing on the web build the e2e drives. There is no theme row: the app has one palette, and
+was shown rather than a preference. Confirmations go through `src/lib/confirm.ts` (`confirmAction`; one-button messages through
+`notify`), because react-native-web's `Alert.alert` is an empty stub and a two-button confirm
+through it did nothing on the web build the e2e drives. There is no theme row: the app has one palette, and
 `__tests__/appearance.test.ts` pins `userInterfaceStyle: light` to that. About shows the
 version from `expo-constants` (`Constants.expoConfig.version`, app.json's `version`; not yet
 checked on an EAS build, where `appVersionSource: remote` may need `expo-application` as the

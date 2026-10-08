@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<!-- DrawDraw's web page. `expo export` fills in the language and title, appends the favicon and
+     the bundle, and copies this folder to the site; scripts/build-web.mjs then adds the policy as
+     <meta> tags and points the root-absolute addresses below at the site's base path. No inline
+     script or style: the policy allows neither. -->
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no" />
+    <title>%WEB_TITLE%</title>
+    <meta name="description" content="Lay a turnable 3D three-segment construction head over a portrait, fit it with three taps, and export drawing layers. Runs in your browser; the photo never leaves your device." />
+    <meta name="theme-color" content="#f4efe6" />
+    <link rel="stylesheet" href="/site.css" />
+    <script src="/guard.js"></script>
+  </head>
+
+  <body>
+    <noscript>
+      <div class="site-note site-note-standing" role="alert">
+        <strong>DrawDraw needs JavaScript.</strong> Everything runs in your browser and nothing is
+        uploaded, but the head guide is drawn with JavaScript. Turn it on for this site, then reload
+        the page.
+      </div>
+    </noscript>
+    <div id="site-not-started" class="site-note site-note-standing" role="alert" hidden>
+      <strong>DrawDraw has not started.</strong> Reload the page. If it still does not start, this
+      browser may be too old for it: use a current Safari, Chrome, Edge or Firefox.
+    </div>
+    <div id="site-stopped" class="site-note" role="alert" hidden>
+      <strong>DrawDraw stopped working.</strong> Reload the page to start again. Your settings are
+      kept; a portrait opened in the browser has to be chosen again.
+    </div>
+    <!-- The root element the app renders into. -->
+    <div id="root"></div>
+  </body>
+</html>

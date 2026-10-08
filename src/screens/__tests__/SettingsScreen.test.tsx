@@ -8,7 +8,7 @@ jest.mock('../../lib/confirm', () => ({ confirmAction: jest.fn() }));
 
 import React from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
-import { Linking, Switch, Text } from 'react-native';
+import { Linking, Platform, Switch, Text } from 'react-native';
 
 import { confirmAction } from '../../lib/confirm';
 import { DEFAULTS } from '../../lib/settings';
@@ -107,4 +107,28 @@ it('gives every control a role, and the switch its label', async () => {
   expect(pressables.length).toBeGreaterThanOrEqual(3); // Close, Reset, the link
   for (const node of pressables) expect(node.props.accessibilityRole).toMatch(/^(button|link)$/);
   expect(root().findByType(Switch).props.accessibilityLabel).toBe('Vibration');
+});
+
+describe('the Vibration row in a browser', () => {
+  const realOS = Platform.OS;
+  afterEach(() => {
+    Platform.OS = realOS;
+  });
+
+  it('is off and disabled, and says why, rather than a switch that changes nothing', async () => {
+    Platform.OS = 'web';
+    await mount(props()); // haptics on in the record
+    const toggle = root().findByType(Switch);
+    expect(toggle.props.disabled).toBe(true);
+    expect(toggle.props.value).toBe(false);
+    expect(root().findAllByType(Text).some((t) => String(t.props.children).startsWith('A browser cannot vibrate'))).toBe(true);
+  });
+
+  it('is a live switch on a device', async () => {
+    Platform.OS = 'ios';
+    await mount(props());
+    const toggle = root().findByType(Switch);
+    expect(toggle.props.disabled).toBe(false);
+    expect(toggle.props.value).toBe(true);
+  });
 });

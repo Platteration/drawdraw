@@ -1,5 +1,5 @@
 import React from 'react';
-import { Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 
 import { colors, radius, type } from '../theme';
@@ -31,6 +31,10 @@ export interface SettingsScreenProps {
 }
 
 export default function SettingsScreen({ settings, onChange, onReset, onClose }: SettingsScreenProps) {
+  // A browser has no haptic engine to drive (src/lib/feedback.ts does nothing
+  // there), so on the web the Vibration row says so and its switch is off and
+  // disabled rather than a control that changes nothing.
+  const canVibrate = Platform.OS !== 'web';
   const reset = () =>
     confirmAction({
       title: 'Reset settings?',
@@ -56,12 +60,15 @@ export default function SettingsScreen({ settings, onChange, onReset, onClose }:
             <View style={styles.rowText}>
               <Text style={styles.rowTitle}>Vibration</Text>
               <Text style={styles.rowHint}>
-                A tick when the guide snaps to a standard view, and when a three-tap fit lands.
+                {canVibrate
+                  ? 'A tick when the guide snaps to a standard view, and when a three-tap fit lands.'
+                  : 'A browser cannot vibrate, so this is off here. The iOS and Android app ticks when the guide snaps to a standard view, and when a three-tap fit lands.'}
               </Text>
             </View>
             <Switch
               accessibilityLabel="Vibration"
-              value={settings.haptics}
+              disabled={!canVibrate}
+              value={canVibrate && settings.haptics}
               onValueChange={(haptics) => onChange({ haptics })}
               trackColor={{ false: colors.paperEdge, true: colors.accent }}
               thumbColor={colors.paper}

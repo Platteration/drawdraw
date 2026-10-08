@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,7 +13,7 @@ import type { ImagePickerResult } from 'expo-image-picker';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
-import { confirmAction } from '../lib/confirm';
+import { confirmAction, notify } from '../lib/confirm';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS, type Polyline } from '../lib/headModel';
 import type { Project } from '../lib/projectShape';
 import { createProject, deleteProject, listProjects } from '../lib/storage';
@@ -67,6 +67,10 @@ export default function HomeScreen({
 }: HomeScreenProps) {
   const [busy, setBusy] = useState(false);
   const [recents, setRecents] = useState<Project[]>([]);
+  // A browser keeps the settings (localStorage) but has no file system to
+  // copy a portrait into, so every portrait opened there lasts as long as the
+  // page: the home screen says so once, rather than an alert on every import.
+  const keepsPortraits = Platform.OS !== 'web';
 
   const refresh = useCallback(() => {
     listProjects().then(setRecents);
@@ -78,15 +82,15 @@ export default function HomeScreen({
     if (result.canceled || !result.assets || result.assets.length === 0) return;
     const asset = result.assets[0]!; // the line above returned on an empty list
     if (!asset.width || !asset.height) {
-      Alert.alert('Unsupported image', 'Could not read the dimensions of that image.');
+      notify('Unsupported image', 'Could not read the dimensions of that image.');
       return;
     }
     const project = await createProject(asset);
-    if (project.ephemeral) {
+    if (project.ephemeral && keepsPortraits) {
       // The durable copy failed, so this portrait only lasts as long as the
       // system keeps the picker's own file. Better to say so than to leave a
       // Recent thumbnail that goes blank later with no way to repair it.
-      Alert.alert(
+      notify(
         'Opened, but not saved',
         'This portrait could not be copied into DrawDraw, so it will not appear under Recent. Your guide setup will not be kept either.'
       );
@@ -127,7 +131,7 @@ export default function HomeScreen({
     try {
       const permission = await ImagePicker.requestCameraPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission needed', 'Allow camera access to take a portrait.');
+        notify('Permission needed', 'Allow camera access to take a portrait.');
         return;
       }
       await openAsset(await ImagePicker.launchCameraAsync({ quality: 1 }));
@@ -181,6 +185,13 @@ export default function HomeScreen({
           <Text style={[styles.buttonText, styles.secondaryText]}>Take a photo</Text>
         </Pressable>
       </View>
+
+      {!keepsPortraits && (
+        <Text style={styles.webNote}>
+          In a browser, DrawDraw keeps your settings but not your portraits: choose the photo again
+          next time. Nothing is uploaded.
+        </Text>
+      )}
 
       {recents.length > 0 && (
         <View style={styles.recentsBlock}>
@@ -317,6 +328,13 @@ const styles = StyleSheet.create({
   },
   footerDot: {
     color: colors.graphiteFaint,
+  },
+  webNote: {
+    color: colors.graphiteSoft,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
+    marginTop: 16,
   },
   recentsHint: {
     color: colors.graphiteFaint,
