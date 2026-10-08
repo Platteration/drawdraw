@@ -376,6 +376,14 @@ try {
   check('a bundle that fails to load shows the "has not started" note', await broken.page.locator('#site-not-started').isVisible());
   await broken.context.close();
 
+  // Without site.css the app still draws, into a root with no height: the note stays.
+  const unstyled = await sitePage();
+  await unstyled.page.route('**/site.css', (route) => route.abort());
+  await unstyled.page.goto(site, { waitUntil: 'networkidle' });
+  await unstyled.page.waitForTimeout(800);
+  check('a stylesheet that fails to load keeps the "has not started" note up', await unstyled.page.locator('#site-not-started').isVisible());
+  await unstyled.context.close();
+
   // Pro's turnaround sheet, the one export with text in it. This build sells
   // nothing, so the test plants the stored entitlement the way a purchase would.
   const pro = await sitePage();

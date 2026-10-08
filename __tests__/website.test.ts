@@ -335,10 +335,12 @@ describe('the pages', () => {
     }
   });
 
-  it('load the safety net before the bundle, from its own file', () => {
+  it('load the safety net before the stylesheet and the bundle, from its own file', () => {
+    // A stylesheet that fails fires its error before a script after it runs.
     const html = read('public/index.html');
     const guard = html.indexOf('<script src="/guard.js"></script>');
     expect(guard).toBeGreaterThan(0);
+    expect(guard).toBeLessThan(html.indexOf('<link rel="stylesheet"'));
     expect(guard).toBeLessThan(html.indexOf('</head>'));
     expect(html).toContain('<noscript>');
   });

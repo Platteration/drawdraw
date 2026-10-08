@@ -9,6 +9,7 @@
   'use strict';
 
   let started = false;
+  let failed = false;
 
   function show(id) {
     const note = document.getElementById(id);
@@ -19,14 +20,22 @@
     if (note) note.hidden = true;
   }
 
-  // Whatever went wrong before the app drew its first screen means it has not started. A failed
-  // or refused <script> fires `error` on the element, which does not bubble: capture phase.
+  // A failed or refused <script> or stylesheet fires `error` on the element, which does not
+  // bubble: capture phase. Either one leaves the app unusable for good (without site.css the
+  // react-native-web root has no height and the editor never lays out), so the note stays even
+  // once the app draws. Any other error before the app has drawn means it has not started.
   window.addEventListener(
     'error',
     function (event) {
       const target = event.target;
-      const failedScript = target && target !== window && target.tagName === 'SCRIPT';
-      if (failedScript || !started) show('site-not-started');
+      if (target && target !== window && target.tagName) {
+        if (target.tagName === 'SCRIPT' || (target.tagName === 'LINK' && target.rel === 'stylesheet')) {
+          failed = true;
+          show('site-not-started');
+        }
+        return; // an image has its own handling in the app
+      }
+      if (!started) show('site-not-started');
     },
     true
   );
@@ -37,7 +46,7 @@
     const check = function () {
       if (root.firstElementChild) {
         started = true;
-        hide('site-not-started');
+        if (!failed) hide('site-not-started');
         hide('site-stopped');
       } else if (started) {
         show('site-stopped');

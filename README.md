@@ -177,9 +177,10 @@ The headers, the same in `public/_headers`, `public/.htaccess` and `deploy/nginx
 
 Apache and nginx serve the site's files and nothing else: a dotfile, a host config, a folder
 listing or a repository file copied up by mistake is answered with the site's own `404.html`,
-which needs no script. `guard.js`, loaded before the bundle, is the safety net: a bundle that
-fails to load, is refused or throws before the app draws shows "DrawDraw has not started"
-instead of a blank page, and an app that stops after starting says so. With JavaScript off, a
+which needs no script. `guard.js`, loaded before the stylesheet and the bundle, is the safety
+net: a bundle or stylesheet that fails to load or is refused, or a bundle that throws before the
+app draws, shows "DrawDraw has not started" instead of a blank page, and an app that stops after
+starting says so. With JavaScript off, a
 `<noscript>` note says what is needed.
 
 **One origin per app.** Browser storage is per origin. A GitHub Pages project site shares
