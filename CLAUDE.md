@@ -107,7 +107,9 @@ also is. Run both (and `npm run check`) before pushing.
   adds the policy as `<meta>` tags from `public/_headers`, points root-absolute
   addresses at the base path (`app.config.js` hands Expo that path as
   `experiments.baseUrl`, only when `WEB_BASE_URL` is set, so app.json is read as
-  written everywhere else), and checks every page reference resolves. The
+  written everywhere else), and checks every page reference resolves;
+  `--host` keeps only the config file that host reads (and writes `.nojekyll`
+  for GitHub Pages, whose Jekyll drops `_expo/`). The
   policy is in four places — `public/_headers`, `public/.htaccess`,
   `deploy/nginx.conf`, and the built pages' `<meta>` — and
   `__tests__/website.test.ts` holds them equal, along with the allow-list of

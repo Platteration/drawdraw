@@ -2,12 +2,19 @@
 // Builds the website: the Expo web export, with the hosting layer in public/ copied in by the
 // export, finished for the path it will be served under.
 //
-//   node scripts/build-web.mjs [--base-url /drawdraw] [--output-dir .web-build]
+//   node scripts/build-web.mjs [--base-url /drawdraw] [--output-dir .web-build] [--host <host>]
 //
 // --base-url    the path the site is served under: /drawdraw for a GitHub Pages project site,
 //               nothing (the default) for a site at the root of its own domain.
 // --output-dir  where the site is written (default .web-build): a folder inside the project that
 //               is absent, empty or an earlier build, because it is emptied first.
+// --host        netlify, cloudflare, apache, nginx or github-pages: keep only the config file
+//               that host reads (_headers and _redirects for Netlify and Cloudflare Pages,
+//               .htaccess for Apache, none for nginx, whose config is deploy/nginx.conf, or for
+//               GitHub Pages, which reads none), so no host serves another's config as a file;
+//               for GitHub Pages also write .nojekyll, without which a branch deploy runs Jekyll,
+//               which drops every path that starts with _ (the bundle is under _expo/). Without
+//               --host all three configs stay, and each host ignores the others'.
 //
 // `expo export` copies public/ into the site and fills in public/index.html; this then
 //  - adds the Content-Security-Policy and referrer <meta> tags to every page, from the policy in
@@ -103,18 +110,41 @@ export function pageReferences(html, base) {
   return refs;
 }
 
+/** The config files each host reads from the published folder. */
+export const HOST_CONFIGS = {
+  netlify: ['_headers', '_redirects'],
+  cloudflare: ['_headers', '_redirects'],
+  apache: ['.htaccess'],
+  nginx: [],
+  'github-pages': [],
+};
+const CONFIGS = ['_headers', '_redirects', '.htaccess'];
+
+/** Leave in the site at `out` only the config files `host` reads, and what else it needs. */
+export function finishForHost(out, host) {
+  if (!Object.hasOwn(HOST_CONFIGS, host)) throw new Error(`--host is one of ${Object.keys(HOST_CONFIGS).join(', ')}, not ${host}`);
+  for (const file of CONFIGS) {
+    if (!HOST_CONFIGS[host].includes(file)) fs.rmSync(path.join(out, file), { force: true });
+  }
+  if (host === 'github-pages') fs.writeFileSync(path.join(out, '.nojekyll'), '');
+}
+
 function parseArgs(argv) {
-  const out = { baseUrl: '', outputDir: '.web-build' };
+  const out = { baseUrl: '', outputDir: '.web-build', host: null };
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split('=', 2);
     const value = inline ?? argv[++i];
     if (value === undefined) throw new Error(`${flag} needs a value`);
     if (flag === '--base-url') out.baseUrl = value.replace(/\/+$/, '');
     else if (flag === '--output-dir') out.outputDir = value;
+    else if (flag === '--host') out.host = value;
     else throw new Error(`unknown argument ${argv[i]}`);
   }
   if (out.baseUrl && !/^(\/[A-Za-z0-9._~-]+)+$/.test(out.baseUrl)) {
     throw new Error(`--base-url is a path such as /drawdraw, not ${out.baseUrl}`);
+  }
+  if (out.host !== null && !Object.hasOwn(HOST_CONFIGS, out.host)) {
+    throw new Error(`--host is one of ${Object.keys(HOST_CONFIGS).join(', ')}, not ${out.host}`);
   }
   return out;
 }
@@ -140,7 +170,7 @@ export function outputFolder(outputDir) {
   return out;
 }
 
-export function build({ baseUrl, outputDir }) {
+export function build({ baseUrl, outputDir, host = null }) {
   const out = outputFolder(outputDir);
   fs.rmSync(out, { recursive: true, force: true });
   const run = spawnSync(
@@ -178,6 +208,7 @@ export function build({ baseUrl, outputDir }) {
     }
   }
   if (missing.length) throw new Error(`pages name files the site does not hold:\n  ${missing.join('\n  ')}`);
+  if (host) finishForHost(out, host);
   return out;
 }
 

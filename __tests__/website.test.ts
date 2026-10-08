@@ -17,6 +17,7 @@
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 const root = path.join(__dirname, '..');
@@ -362,6 +363,30 @@ describe('scripts/build-web.mjs', () => {
       expect(fs.existsSync(path.join(root, 'public/index.html'))).toBe(true);
     }
   );
+
+  it.each([
+    ['netlify', ['_headers', '_redirects']],
+    ['cloudflare', ['_headers', '_redirects']],
+    ['apache', ['.htaccess']],
+    ['nginx', []],
+    ['github-pages', ['.nojekyll']],
+  ])('--host %s keeps only the config that host reads', (host, kept) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drawdraw-site-'));
+    try {
+      for (const f of ['_headers', '_redirects', '.htaccess', 'index.html']) fs.writeFileSync(path.join(dir, f), 'x');
+      const script = `import { finishForHost } from './scripts/build-web.mjs'; finishForHost(${JSON.stringify(dir)}, ${JSON.stringify(host)});`;
+      execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root });
+      expect(fs.readdirSync(dir).sort()).toEqual([...kept, 'index.html'].sort());
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a host it does not know, before it touches anything', () => {
+    // With an --output-dir it would also refuse, so the host is what was refused first.
+    expect(refuse('--host', 'iis', '--output-dir', '.')).toMatch(/--host is one of/);
+    expect(refuse('--host', 'constructor', '--output-dir', '.')).toMatch(/--host is one of/);
+  });
 
   it('refuses a base path that is not one', () => {
     expect(refuse('--base-url', 'drawdraw')).toMatch(/--base-url/);

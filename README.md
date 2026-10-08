@@ -141,8 +141,8 @@ the visitor's device. The photo is read by the browser, never uploaded, and the 
 connection of its own (`connect-src 'none'`).
 
 ```bash
-npm run build:web                          # a site for the root of its own domain, in .web-build/
-npm run build:web -- --base-url /drawdraw  # a site served under /drawdraw/ (a GitHub Pages project site)
+npm run build:web -- --host netlify        # a site for the root of its own domain, in .web-build/
+npm run build:web -- --host github-pages --base-url /drawdraw   # served under /drawdraw/
 ```
 
 `scripts/build-web.mjs` runs `expo export --platform web`, which copies `public/` into the site
@@ -151,14 +151,15 @@ policy into every page as `<meta>` tags, points the pages' addresses at the base
 Expo's `metadata.json`, and refuses a site in which a page names a file it does not hold.
 **Publish the contents of `.web-build/`, never the checkout.** The site is exactly `index.html`,
 `404.html`, `guard.js`, `site.css`, `favicon.ico`, `robots.txt`, `.well-known/security.txt` and
-the content-hashed bundle under `_expo/static/`, plus the config file for your host:
+the content-hashed bundle under `_expo/static/`, plus the config file for your host; without
+`--host` all three configs stay, and each host ignores the others':
 
 | Host | Reads | Notes |
 | --- | --- | --- |
-| Netlify, Cloudflare Pages | `_headers`, `_redirects` | Publish `.web-build/`. Netlify refuses `.htaccess` through `_redirects`; Cloudflare Pages has no 404 rule and serves it as a file (nothing in it is not already public here). |
-| Apache 2.4 | `.htaccess` | Needs `mod_rewrite`, `mod_headers` and `AllowOverride FileInfo Options`. |
-| nginx | `deploy/nginx.conf` | Copy it into the server's config, set `server_name`, `root` and the certificate paths. Written for a domain root. |
-| GitHub Pages | nothing | Sends no headers of its own choosing: only the `<meta>` policy applies (not `frame-ancestors`, which a `<meta>` cannot carry), and HSTS, nosniff, the framing refusal, the Permissions-Policy and COOP/CORP do not. Build with `--base-url /<repo>`. |
+| Netlify, Cloudflare Pages | `_headers`, `_redirects` | Build with `--host netlify` or `--host cloudflare`, which leaves `.htaccess` out (Netlify would refuse it through `_redirects` anyway; Cloudflare Pages has no 404 rule and would serve it as a file). |
+| Apache 2.4 | `.htaccess` | Build with `--host apache`. Needs `mod_rewrite`, `mod_headers` and `AllowOverride FileInfo Options`. |
+| nginx | `deploy/nginx.conf` | Build with `--host nginx`; copy the config into the server's, set `server_name`, `root` and the certificate paths. Written for a domain root. |
+| GitHub Pages | nothing | Build with `--host github-pages --base-url /<repo>`, which writes `.nojekyll`: a branch deploy otherwise runs Jekyll, which drops every path starting with `_`, the bundle's `_expo/` among them. Pages sends no headers of the site's choosing: only the `<meta>` policy applies (not `frame-ancestors`, which a `<meta>` cannot carry), and HSTS, nosniff, the framing refusal, the Permissions-Policy and COOP/CORP do not. |
 
 The headers, the same in `public/_headers`, `public/.htaccess` and `deploy/nginx.conf`
 (`__tests__/website.test.ts` fails when they are not):
