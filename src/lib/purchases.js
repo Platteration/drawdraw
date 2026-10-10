@@ -5,7 +5,12 @@
  * built, run and reviewed without a billing SDK configured. Wiring a real
  * store means implementing these three calls against StoreKit / Play Billing
  * (directly, or through a service such as RevenueCat) and swapping the
- * provider below — nothing else in the app needs to change.
+ * provider below. The provider must validate transactions with the store and
+ * return { pro: true } only for an active, completed Pro entitlement. Pending
+ * payments and cancellations must never be reported as active entitlements.
+ * getProducts supplies the store's localized price; restore returns { pro: false }
+ * when the store confirms that there is no active purchase. A production store
+ * integration must also refresh entitlements for refunds and revocations.
  *
  * The app deliberately has no ads, no consumable currency, and no
  * subscription: a single one-time unlock, plus optional content packs.
@@ -16,7 +21,6 @@ export const PRODUCTS = {
     id: 'com.platteration.drawdraw.pro',
     title: 'DrawDraw Pro',
     blurb: 'The full construction head, proportion packs, turnaround sheets and the step-by-step lessons.',
-    price: '$7.99',
     kind: 'one-time',
   },
 };
@@ -27,38 +31,61 @@ class NotConfiguredProvider {
   }
 
   async getProducts() {
-    return Object.values(PRODUCTS);
+    return [];
   }
 
   async purchase() {
-    const error = new Error(
-      'In-app purchases are not configured in this build. Add a store provider in src/lib/purchases.js.'
-    );
-    error.code = 'not_configured';
-    throw error;
+    throw storeError('not_configured', 'Pro purchases are not available in this build.');
   }
 
   async restore() {
-    const error = new Error(
-      'In-app purchases are not configured in this build. Add a store provider in src/lib/purchases.js.'
-    );
-    error.code = 'not_configured';
-    throw error;
+    throw storeError('not_configured', 'Purchase restoration is not available in this build.');
   }
 }
 
 let provider = new NotConfiguredProvider();
 
-/** Install a real store implementation at app startup. */
+function storeError(code, message) {
+  return Object.assign(new Error(message), { code });
+}
+
+/** Install a real store implementation at app startup; null resets the stub. */
 export function setPurchaseProvider(next) {
-  provider = next;
+  provider = next ?? new NotConfiguredProvider();
 }
 
 export const purchases = {
   get configured() {
-    return provider.configured;
+    return provider.configured === true;
   },
-  getProducts: (...args) => provider.getProducts(...args),
-  purchase: (...args) => provider.purchase(...args),
-  restore: (...args) => provider.restore(...args),
+  async getProducts() {
+    if (!purchases.configured) return [];
+    const products = await provider.getProducts();
+    return Array.isArray(products) ? products.filter((product) =>
+      product?.id === PRODUCTS.pro.id && typeof product.price === 'string' && product.price.trim()
+    ) : [];
+  },
+  async purchase(productId) {
+    if (productId !== PRODUCTS.pro.id) {
+      throw storeError('unknown_product', 'This product is not available.');
+    }
+    if (!purchases.configured) {
+      throw storeError('not_configured', 'Pro purchases are not available in this build.');
+    }
+    const result = await provider.purchase(productId);
+    if (result?.pro !== true) {
+      throw storeError('purchase_not_completed', 'The store has not confirmed a completed Pro purchase.');
+    }
+    return result;
+  },
+  async restore() {
+    if (!purchases.configured) {
+      throw storeError('not_configured', 'Purchase restoration is not available in this build.');
+    }
+    const result = await provider.restore();
+    if (typeof result?.pro !== 'boolean') {
+      throw storeError('invalid_entitlements', 'The store could not confirm your purchases. Please try again.');
+    }
+    return result;
+  },
 };

@@ -8,17 +8,17 @@ export const colors = {
   paperDeep: '#e8e0d2',
   paperEdge: '#d8cdb9',
   graphite: '#2e2a26',
-  graphiteSoft: '#6d6459',
-  graphiteFaint: '#9c9285',
+  graphiteSoft: '#685f55',
+  graphiteFaint: '#6b6257',
   ink: '#1f1c19',
-  accent: '#b4543a', // sanguine / red chalk
+  accent: '#a24830', // sanguine / red chalk
   accentSoft: '#e2c4ba',
   canvasMat: '#3a352f', // surround behind the photo
 };
 
 /** Guide line colors, named the way an artist would reach for them. */
 export const GUIDE_COLORS = [
-  { name: 'Sanguine', value: '#b4543a' },
+  { name: 'Sanguine', value: colors.accent },
   { name: 'Graphite', value: '#3d3833' },
   { name: 'Blue', value: '#3f6fb0' },
   { name: 'Chalk', value: '#f7f3ec' },

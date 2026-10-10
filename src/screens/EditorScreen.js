@@ -1,15 +1,17 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { captureRef } from 'react-native-view-shot';
+import { captureRef, releaseCapture } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
@@ -28,7 +30,9 @@ import {
   ELEMENTS,
   PROPORTION_PRESETS,
 } from '../lib/headModel';
-import { saveSettings } from '../lib/storage';
+import { recoverProjects, saveSettings } from '../lib/storage';
+import { createAutosave } from '../lib/autosave';
+import { presentCapturedExport } from '../lib/exportLifecycle';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 
 const THIRDS = [1 / 3, 2 / 3];
@@ -87,6 +91,14 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
 
   const [viewport, setViewport] = useState(null); // area available for the image
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [closing, setClosing] = useState(false);
+  const [recoveryRequired, setRecoveryRequired] = useState(project.recoveryRequired === true);
+  const [recovering, setRecovering] = useState(false);
+  const closingRef = useRef(false);
+  const exportingRef = useRef(false);
+  const recoveringRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const combinedRef = useRef(null); // photo + guides
   const guidesOnlyRef = useRef(null); // guides on transparency
@@ -153,12 +165,62 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     ]
   );
 
+  const [autosave] = useState(() => createAutosave({
+    initialValue: settings,
+    save: (value) => saveSettings(project.id, value),
+    onError: (error) => {
+      if (mountedRef.current) setSaveError(error);
+    },
+  }));
+
+  // Record committed edits before another event can close or background the app.
+  useLayoutEffect(() => {
+    autosave.update(settings);
+  }, [autosave, settings]);
+
   useEffect(() => {
-    const id = setTimeout(() => {
-      saveSettings(project.id, settings).catch(() => {});
-    }, 600);
-    return () => clearTimeout(id);
-  }, [project.id, settings]);
+    mountedRef.current = true;
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') autosave.flush().catch(() => {});
+    });
+    return () => {
+      mountedRef.current = false;
+      subscription.remove();
+      autosave.flush().catch(() => {});
+    };
+  }, [autosave]);
+
+  const closeEditor = async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
+    try {
+      await autosave.flush();
+      onClose();
+    } catch {
+      // Keep the current work and export controls available while storage recovers.
+    } finally {
+      closingRef.current = false;
+      if (mountedRef.current) setClosing(false);
+    }
+  };
+
+  const recoverDrawings = async () => {
+    if (recoveringRef.current) return;
+    recoveringRef.current = true;
+    setRecovering(true);
+    try {
+      await recoverProjects();
+      setRecoveryRequired(false);
+      await autosave.flush();
+      setSaveError(null);
+    } catch (error) {
+      setSaveError(error);
+    } finally {
+      recoveringRef.current = false;
+      if (mountedRef.current) setRecovering(false);
+    }
+  };
 
   const guides = {
     horizontal: showHorizontal ? hGuides : [],
@@ -225,17 +287,25 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   };
 
   const exportView = async (ref, name, size) => {
-    if (busy || !ref.current) return;
+    if (exportingRef.current || !ref.current) return;
+    exportingRef.current = true;
     setBusy(true);
     try {
       const uri = await captureRef(ref, { format: 'png', quality: 1, ...size });
-
-      Alert.alert(name, 'Where do you want it?', [
-        {
-          text: 'Save to Photos',
-          onPress: async () => {
+      await presentCapturedExport({
+        uri,
+        release: releaseCapture,
+        present: ({ onSave, onShare, onCancel, onDismiss }) => Alert.alert(name, 'Where do you want it?', [
+          { text: 'Save to Photos', onPress: onSave },
+          { text: 'Share…', onPress: onShare },
+          { text: 'Cancel', style: 'cancel', onPress: onCancel },
+        ], { cancelable: true, onDismiss }),
+        save: async () => {
             try {
-              const permission = await MediaLibrary.requestPermissionsAsync();
+              // Saving adds an image; it does not need granular read access.
+              // SDK57 Expo Go rejects photo/video granular requests even when
+              // writeOnly is true. Older Android still requests legacy writes.
+              const permission = await MediaLibrary.requestPermissionsAsync(true, []);
               if (!permission.granted) {
                 Alert.alert('Permission needed', 'Allow photo library access to save exports.');
                 return;
@@ -245,28 +315,28 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
             } catch (err) {
               Alert.alert('Save failed', String(err?.message ?? err));
             }
-          },
         },
-        {
-          text: 'Share…',
-          onPress: async () => {
+        share: async () => {
             try {
               if (await Sharing.isAvailableAsync()) {
                 await Sharing.shareAsync(uri, { mimeType: 'image/png' });
+                // Android resolves when the chooser returns, without proving
+                // the receiving app has finished reading its content URI.
+                // Leave that capture to the native library/cache cleanup.
+                return { retainCapture: Platform.OS === 'android' };
               } else {
                 Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
               }
             } catch (err) {
               Alert.alert('Share failed', String(err?.message ?? err));
             }
-          },
         },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      });
     } catch (err) {
       Alert.alert('Export failed', String(err?.message ?? err));
     } finally {
-      setBusy(false);
+      exportingRef.current = false;
+      if (mountedRef.current) setBusy(false);
     }
   };
 
@@ -275,6 +345,9 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const headInteractive = showHead && mode !== 'lines' && mode !== 'fit';
   const linesEditable = mode === 'lines';
   const photoVisible = !practice || peeking;
+  const practiceBackground = practice && guideColor === GUIDE_COLORS.find((color) => color.name === 'Chalk').value
+    ? colors.canvasMat
+    : colors.paper;
 
   // Everything that goes on top of the photo, mirrored 1:1 in the exports.
   const renderGuides = ({ draft = false } = {}) => (
@@ -306,14 +379,27 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={onClose} hitSlop={12}>
-          <Text style={styles.headerAction}>‹ Portraits</Text>
+        <Pressable onPress={closeEditor} disabled={closing} hitSlop={12}>
+          <Text style={styles.headerAction}>{closing ? 'Saving…' : '‹ Portraits'}</Text>
         </Pressable>
         <Text style={type.title}>Three-segment head</Text>
         <Pressable onPress={resetAll} hitSlop={12}>
           <Text style={styles.headerAction}>Reset</Text>
         </Pressable>
       </View>
+
+      {(saveError || recoveryRequired) && (
+        <View style={styles.saveWarning} accessibilityLiveRegion="polite">
+          <Text style={styles.saveWarningText}>
+            {recoveryRequired
+              ? 'Some saved drawings or guide settings need recovery. Damaged guide settings use defaults. The original data will be kept in a recovery copy. You can export this drawing below.'
+              : 'Changes are not saved. Keep this portrait open and retry, or export your work below.'}
+          </Text>
+          <Pressable onPress={recoveryRequired ? recoverDrawings : () => autosave.flush().catch(() => {})} disabled={recovering} hitSlop={8}>
+            <Text style={styles.headerAction}>{recovering ? 'Recovering…' : recoveryRequired ? 'Recover saved drawings' : 'Retry save'}</Text>
+          </Pressable>
+        </View>
+      )}
 
       <View
         style={styles.canvasArea}
@@ -323,7 +409,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         }}
       >
         {ready && (
-          <View style={[styles.canvas, { width: displayW, height: displayH }]}>
+          <View style={[styles.canvas, { width: displayW, height: displayH, backgroundColor: practiceBackground }]}>
             <Image
               source={{ uri: image.uri }}
               style={{ width: displayW, height: displayH, opacity: photoVisible ? 1 : 0 }}
@@ -544,6 +630,9 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                 <Pressable
                   key={c.value}
                   onPress={() => setGuideColor(c.value)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${c.name} guide color`}
+                  accessibilityState={{ selected: c.value === guideColor }}
                   style={[
                     styles.swatch,
                     { backgroundColor: c.value },
@@ -677,6 +766,16 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 14,
     fontWeight: '700',
+  },
+  saveWarning: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 6,
+  },
+  saveWarningText: {
+    color: colors.graphite,
+    fontSize: 13,
+    lineHeight: 18,
   },
   canvasArea: {
     flex: 1,

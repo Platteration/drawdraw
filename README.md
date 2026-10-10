@@ -2,6 +2,8 @@
 
 A portrait-drawing app for iOS and Android, built with [Expo](https://expo.dev) / React Native.
 
+Warm paper, graphite labels, and dark sanguine controls give it a sketchbook look.
+
 Load a portrait and DrawDraw overlays the **three-segment head** — the classic method of
 dividing a face into three equal parts: chin→nose, nose→eyebrows, eyebrows→top of the
 skull. The guide is not a flat grid but a **3D construction head**: the divisions are rings
@@ -47,6 +49,14 @@ hold-to-peek button to check yourself.
 autosaved. Picked images are copied out of the OS cache into the app's documents directory,
 so recents cannot break when the system clears its cache.
 
+Save failures keep your current work open with a retry action. If the saved project
+index is partly damaged, readable drawings remain available for export. Recovery
+keeps the original index before restoring those drawings; **Remove recovery copies**
+deletes those snapshots separately from your current projects. Recent portraits have
+named open and removal buttons, with removal confirmed before deleting; damaged
+indexes must be recovered before individual drawings can be removed. Home scrolls
+to keep these controls reachable on smaller screens and with larger text.
+
 ## How the fit works
 
 A head turned or tilted away from the viewer foreshortens its segments *unequally*, and the
@@ -70,17 +80,26 @@ The method itself, fitting it to a photo, and all three portrait exports are fre
 one-time unlock (not a subscription) covering the full construction head, the child /
 infant / stylized proportion packs, turnaround sheets, and the step-by-step lessons.
 
-Billing is deliberately **not wired up in this repo**. `src/lib/purchases.js` defines the
-provider interface and ships a `NotConfiguredProvider` that reports honestly rather than
-pretending to charge, so the app builds and runs without a billing SDK. Implementing
-`getProducts` / `purchase` / `restore` against StoreKit or Play Billing (directly or
-through a service such as RevenueCat) and calling `setPurchaseProvider` at startup is the
-only change needed; entitlement storage and every gate already work.
+Billing is **not wired up in this repo**. `src/lib/purchases.js` ships an unavailable
+provider, and the Pro screen shows no purchase price or purchase/restore actions until a
+store provider is configured. Paid launch requires StoreKit / Play Billing integration
+(directly or through a service such as RevenueCat) and matching store product records.
+
+Register the provider with `setPurchaseProvider` at startup. `getProducts` returns the
+known product ID and the store's localized `price`; `purchase` must return `{ pro: true }`
+only after validating an active, completed entitlement. A resolved pending or canceled
+transaction does not unlock Pro. `restore` returns an explicit boolean `pro`, including
+`false` when the store confirms no active purchase. The local entitlement cache supports
+offline use; production integration must also validate receipts and refresh entitlements
+on launch/resume to handle refunds and revocations. Complete the billing cases in
+[native release validation](docs/NATIVE_VALIDATION.md) before enabling paid purchases.
 
 ## Running it
 
+CI and EAS profiles use Node 22.23.3. Use the same version for local validation.
+
 ```bash
-npm install
+npm ci
 npx expo start
 ```
 
@@ -90,7 +109,7 @@ haptics and the share sheet need a real device.
 ## Development
 
 ```bash
-npm test          # unit tests for the head model, fit solver and filenames
+npm test          # geometry, fitting, storage, billing and regression tests
 npm run e2e       # build for web and drive the app in a real browser
 npm run icons     # regenerate assets/ from the head model
 ```
@@ -103,22 +122,36 @@ refusal of degenerate input. CI runs the tests, bundles for both platforms, and
 checks that `assets/` still matches what the model generates.
 
 Bundling proves the app compiles; `npm run e2e` proves it runs. It builds for
-web, serves it, and drives the real critical path in Chromium — onboarding,
-importing a portrait, fitting the guide with three taps — then reads the
-rendered SVG back and checks where the guide actually landed against a
-synthetic portrait laid out on known thirds. Any console or page error fails
+web, serves it, and drives onboarding, importing a portrait, fitting the guide,
+editing its pose and construction, flat guides, style controls, practice,
+autosave, recovery and Pro gating. It reads the rendered SVG back and checks
+where the guide actually landed against a synthetic portrait laid out on
+known thirds. Any console or page error fails
 the run, which is how a runtime break gets caught while bundling still
 succeeds. Web is a test surface rather than a shipping target.
 
 ## Building standalone apps
 
+`eas.json` pins EAS CLI 24.12.1 and defines `preview` for internal device testing and
+`production` for store builds. Production build numbers are managed remotely by EAS
+and increment automatically; the user-visible version remains in `app.json`.
+
+Before building, authenticate with the intended Expo account and link this checkout to
+its actual EAS project using `npx --yes eas-cli@24.12.1 init`. Configure signing for
+`com.platteration.drawdraw`; internal iOS builds also need registered test devices.
+The repository does not contain account IDs or signing credentials.
+
 ```bash
-npm install -g eas-cli
-eas build --platform ios
-eas build --platform android
+npx --yes eas-cli@24.12.1 build --profile preview --platform all
+# After completing docs/NATIVE_VALIDATION.md on iOS and Android:
+npx --yes eas-cli@24.12.1 build --profile production --platform all
 ```
 
-Photo library and camera permission strings are configured in `app.json`.
+These commands request builds, not store publication. Store submission additionally
+requires the App Store Connect / Play Console app records, signing and submission
+access, privacy policy and support URLs, disclosures, screenshots, and review details.
+Paid releases also require the billing integration described above. Native permission
+configuration is in `app.json`; review permissions in the final signed artifacts.
 
 ## Project layout
 

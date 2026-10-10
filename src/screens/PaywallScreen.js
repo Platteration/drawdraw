@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
 import { FREE_FEATURES, PRO_FEATURES } from '../lib/pro';
-import { PRODUCTS } from '../lib/purchases';
+import { PRODUCTS, purchases } from '../lib/purchases';
 
 const ALL_ELEMENTS = {
   center: true,
@@ -51,13 +51,35 @@ function FullHead({ size = 150 }) {
 
 export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
   const [busy, setBusy] = useState(false);
+  const [storeProduct, setStoreProduct] = useState(null);
+  const [loading, setLoading] = useState(purchases.configured);
   const product = PRODUCTS.pro;
+  const configured = purchases.configured;
+
+  useEffect(() => {
+    let active = true;
+    purchases.getProducts()
+      .then((products) => {
+        if (active) setStoreProduct(products.find((item) => item.id === product.id) ?? null);
+      })
+      .catch(() => {
+        if (active) setStoreProduct(null);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [product.id]);
 
   const run = async (action, label) => {
     if (busy) return;
     setBusy(true);
     try {
-      await action();
+      const result = await action();
+      if (label === 'Restore' && result?.pro === false) {
+        Alert.alert('No purchase found', 'The store did not find a Pro purchase for this account.');
+        return;
+      }
       onClose();
     } catch (err) {
       Alert.alert(
@@ -105,21 +127,31 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
         </View>
 
         <Text style={styles.fine}>
-          One payment, not a subscription. Your drawings and exports are never watermarked.
+          {configured
+            ? 'One payment, not a subscription. Your drawings and exports are never watermarked.'
+            : 'Pro is not available in this build. Your free drawing tools and portrait exports remain available.'}
         </Text>
       </ScrollView>
 
       <View style={styles.footer}>
-        <Pressable
-          style={[styles.buy, busy && styles.buyDisabled]}
-          disabled={busy}
-          onPress={() => run(() => onPurchase(product.id), 'Purchase')}
-        >
-          <Text style={styles.buyText}>{`Unlock Pro · ${product.price}`}</Text>
-        </Pressable>
-        <Pressable onPress={() => run(onRestore, 'Restore')} disabled={busy} hitSlop={10}>
-          <Text style={styles.restore}>Restore purchase</Text>
-        </Pressable>
+        {storeProduct ? (
+          <Pressable
+            style={[styles.buy, busy && styles.buyDisabled]}
+            disabled={busy}
+            onPress={() => run(() => onPurchase(product.id), 'Purchase')}
+          >
+            <Text style={styles.buyText}>{`Unlock Pro · ${storeProduct.price}`}</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.fine}>
+            {loading ? 'Loading store price…' : configured ? 'The store price is unavailable. Please try again later.' : 'Purchases are not available yet.'}
+          </Text>
+        )}
+        {configured && (
+          <Pressable onPress={() => run(onRestore, 'Restore')} disabled={busy} hitSlop={10}>
+            <Text style={styles.restore}>Restore purchase</Text>
+          </Pressable>
+        )}
       </View>
     </View>
   );
@@ -201,7 +233,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   fine: {
-    color: colors.graphiteFaint,
+    color: colors.graphiteSoft,
     fontSize: 12,
     lineHeight: 18,
     textAlign: 'center',

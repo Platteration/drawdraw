@@ -27,7 +27,8 @@ export const FREE_FEATURES = [
 async function read() {
   try {
     const raw = await AsyncStorage.getItem(KEY);
-    return raw ? JSON.parse(raw) : {};
+    const cached = raw ? JSON.parse(raw) : null;
+    return { pro: cached?.pro === true };
   } catch {
     return {};
   }
@@ -39,7 +40,9 @@ async function write(entitlements) {
 
 /**
  * Entitlement state. `pro` gates the paid surface; `purchase` and `restore`
- * go through the store provider and only grant on a resolved transaction.
+ * go through the store provider and only grant on explicit confirmation.
+ * The local boolean is an offline cache, not receipt verification; a shipping
+ * billing provider must validate and refresh entitlements with the store.
  */
 export function useEntitlements() {
   const [pro, setPro] = useState(false);
@@ -47,31 +50,30 @@ export function useEntitlements() {
 
   useEffect(() => {
     read().then((e) => {
-      setPro(!!e.pro);
+      setPro(purchases.configured && e.pro === true);
       setReady(true);
     });
   }, []);
 
-  const grant = useCallback(async () => {
-    const entitlements = { ...(await read()), pro: true };
-    await write(entitlements);
-    setPro(true);
+  const updateEntitlement = useCallback(async (active) => {
+    await write({ pro: active });
+    setPro(active);
   }, []);
 
   const purchase = useCallback(
     async (productId) => {
       const result = await purchases.purchase(productId);
-      await grant();
+      await updateEntitlement(true);
       return result;
     },
-    [grant]
+    [updateEntitlement]
   );
 
   const restore = useCallback(async () => {
     const result = await purchases.restore();
-    if (result?.pro) await grant();
+    await updateEntitlement(result.pro);
     return result;
-  }, [grant]);
+  }, [updateEntitlement]);
 
   return { pro, ready, purchase, restore };
 }

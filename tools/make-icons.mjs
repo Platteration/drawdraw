@@ -25,7 +25,7 @@ const { buildHeadWireframe, HEAD_HEIGHT_UNITS } = await import(
 );
 
 const PAPER = [0xf4, 0xef, 0xe6];
-const SANGUINE = [0xb4, 0x54, 0x3a];
+const SANGUINE = [0xa2, 0x48, 0x30];
 
 // --- raster ---------------------------------------------------------------
 

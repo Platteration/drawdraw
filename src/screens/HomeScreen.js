@@ -13,7 +13,9 @@ import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
-import { createProject, deleteProject, listProjects } from '../lib/storage';
+import {
+  clearRecoveryCopies, createProject, deleteProject, hasRecoveryCopies, inspectRecoverableProjects, listProjects, recoverProjects,
+} from '../lib/storage';
 
 /** Small static ¾-view head, drawn with the real model, as the app's mark. */
 function HeadMark({ size = 118 }) {
@@ -50,12 +52,55 @@ function HeadMark({ size = 118 }) {
 export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = () => {}, onReplayIntro = () => {} }) {
   const [busy, setBusy] = useState(false);
   const [recents, setRecents] = useState([]);
+  const [storageError, setStorageError] = useState(false);
+  const [recovery, setRecovery] = useState(null);
+  const [recoveryError, setRecoveryError] = useState(null);
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryCopies, setRecoveryCopies] = useState(false);
 
   const refresh = useCallback(() => {
-    listProjects().then(setRecents);
+    setRecoveryError(null);
+    hasRecoveryCopies().then(setRecoveryCopies).catch(() => {});
+    listProjects()
+      .then((projects) => {
+        setRecents(projects);
+        setStorageError(false);
+        setRecovery(null);
+      })
+      .catch(async () => {
+        setStorageError(true);
+        try {
+          const readable = await inspectRecoverableProjects();
+          setRecents(readable.projects);
+          const needsRecovery = readable.skippedCount > 0 || readable.resetSettingsCount > 0 || readable.renamedIdCount > 0;
+          setRecovery(needsRecovery && readable.projects.length > 0 ? readable : null);
+          if (!needsRecovery) setStorageError(false);
+        } catch {
+          setRecovery(null);
+        }
+      });
   }, []);
 
   useEffect(refresh, [refresh]);
+
+  const recoverDrawings = async () => {
+    if (busy) return;
+    setBusy(true);
+    setRecovering(true);
+    setRecoveryError(null);
+    try {
+      const recovered = await recoverProjects();
+      setRecents(recovered.projects);
+      setRecoveryCopies(true);
+      setRecovery(null);
+      setStorageError(false);
+    } catch (error) {
+      setRecoveryError(String(error?.message ?? error));
+    } finally {
+      setRecovering(false);
+      setBusy(false);
+    }
+  };
 
   const openAsset = async (result) => {
     if (result.canceled || !result.assets || result.assets.length === 0) return;
@@ -71,12 +116,9 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
     if (busy) return;
     setBusy(true);
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission needed', 'Allow photo access to pick a portrait.');
-        return;
-      }
       await openAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
+    } catch (err) {
+      Alert.alert('Could not import portrait', String(err?.message ?? err));
     } finally {
       setBusy(false);
     }
@@ -92,27 +134,51 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
         return;
       }
       await openAsset(await ImagePicker.launchCameraAsync({ quality: 1 }));
+    } catch (err) {
+      Alert.alert('Could not take photo', String(err?.message ?? err));
     } finally {
       setBusy(false);
     }
   };
 
   const confirmDelete = (project) => {
-    Alert.alert('Remove drawing?', 'This removes the saved portrait and its guide setup.', [
+    if (busy || recovery) return;
+    Alert.alert('Remove drawing?', 'This removes the saved portrait and its active guide setup. Any recovery copies can be removed separately.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
-          await deleteProject(project.id);
-          refresh();
+          try {
+            await deleteProject(project.id);
+          } catch (err) {
+            Alert.alert('Could not remove drawing', String(err?.message ?? err));
+          } finally {
+            refresh();
+          }
+        },
+      },
+    ]);
+  };
+
+  const confirmClearRecovery = () => {
+    Alert.alert('Remove recovery copies?', 'This permanently removes the original data kept during recovery. Your current drawings remain saved.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove copies', style: 'destructive', onPress: async () => {
+          try {
+            await clearRecoveryCopies();
+            setRecoveryCopies(false);
+          } catch (error) {
+            Alert.alert('Could not remove recovery copies', String(error?.message ?? error));
+          }
         },
       },
     ]);
   };
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.hero}>
         <HeadMark />
         <Text style={styles.logo}>DrawDraw</Text>
@@ -131,23 +197,69 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
         </Pressable>
       </View>
 
+      {storageError && (
+        <View accessibilityRole="alert">
+          <Text style={[styles.recentsHint, { color: colors.graphite }]}>
+            {recovery
+              ? `${recovery.skippedCount > 0 ? `${recovery.skippedCount} saved drawing${recovery.skippedCount === 1 ? '' : 's'} could not be read. ` : ''}${recovery.resetSettingsCount > 0 ? `${recovery.resetSettingsCount} drawing${recovery.resetSettingsCount === 1 ? ' has' : 's have'} damaged guide settings and ${recovery.resetSettingsCount === 1 ? 'is' : 'are'} shown with defaults. ` : ''}${recovery.renamedIdCount > 0 ? 'Some saved drawings need recovery to keep their guide settings separate. ' : ''}Readable portraits are available below for export. Saving is paused until recovery.`
+              : 'Saved drawings could not be loaded. Your saved data has not been replaced.'}
+          </Text>
+          {recovery && (
+            <>
+              <Text style={[styles.recentsHint, { color: colors.graphite }]}>
+                Recovery keeps a copy of the original saved data and restores the readable drawings.
+              </Text>
+              <Pressable onPress={recoverDrawings} disabled={busy} accessibilityRole="button">
+                <Text style={styles.footerLink}>{recovering ? 'Recovering…' : 'Recover saved drawings'}</Text>
+              </Pressable>
+            </>
+          )}
+          {recoveryError && <Text style={[styles.recentsHint, { color: colors.graphite }]}>{recoveryError}</Text>}
+          <Pressable onPress={refresh} accessibilityRole="button">
+            <Text style={styles.footerLink}>Retry loading drawings</Text>
+          </Pressable>
+        </View>
+      )}
+
       {recents.length > 0 && (
         <View style={styles.recentsBlock}>
           <Text style={styles.recentsLabel}>Recent</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentsRow}>
-            {recents.map((project) => (
-              <Pressable
-                key={project.id}
-                onPress={() => onOpenProject(project)}
-                onLongPress={() => confirmDelete(project)}
-                style={styles.thumb}
-              >
-                <Image source={{ uri: project.image.uri }} style={styles.thumbImage} />
-              </Pressable>
+            {recents.map((project, index) => (
+              <View key={project.id} style={styles.recentCard}>
+                <Pressable
+                  onPress={() => onOpenProject(recovery ? { ...project, recoveryRequired: true } : project)}
+                  onLongPress={busy || recovery ? undefined : () => confirmDelete(project)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open drawing ${index + 1}`}
+                  accessibilityHint="Reopen this portrait and its guides."
+                  style={styles.thumb}
+                >
+                  <Image source={{ uri: project.image.uri }} style={styles.thumbImage} />
+                </Pressable>
+                <Pressable
+                  onPress={() => confirmDelete(project)}
+                  disabled={busy || !!recovery}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove drawing ${index + 1}`}
+                  accessibilityState={{ disabled: busy || !!recovery }}
+                  style={styles.removeRecent}
+                >
+                  <Text style={styles.removeRecentText}>Remove</Text>
+                </Pressable>
+              </View>
             ))}
           </ScrollView>
-          <Text style={styles.recentsHint}>Tap to reopen · hold to remove</Text>
+          <Text style={styles.recentsHint}>
+            {recovery ? 'Recover saved drawings before removing them.' : 'Tap a portrait to reopen · hold or choose Remove to remove'}
+          </Text>
         </View>
+      )}
+
+      {recoveryCopies && (
+        <Pressable onPress={confirmClearRecovery} accessibilityRole="button">
+          <Text style={styles.footerLink}>Remove recovery copies</Text>
+        </Pressable>
       )}
 
       <View style={styles.footer}>
@@ -163,16 +275,20 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
           </>
         )}
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: colors.paper,
+  },
+  content: {
+    flexGrow: 1,
     justifyContent: 'center',
     paddingHorizontal: 30,
-    backgroundColor: colors.paper,
+    paddingVertical: 24,
   },
   hero: {
     alignItems: 'center',
@@ -230,6 +346,9 @@ const styles = StyleSheet.create({
   recentsRow: {
     gap: 10,
   },
+  recentCard: {
+    alignItems: 'center',
+  },
   thumb: {
     width: 62,
     height: 62,
@@ -242,6 +361,17 @@ const styles = StyleSheet.create({
   thumbImage: {
     width: '100%',
     height: '100%',
+  },
+  removeRecent: {
+    minHeight: 44,
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+  removeRecentText: {
+    color: colors.graphiteSoft,
+    fontSize: 11,
+    fontWeight: '600',
   },
   footer: {
     flexDirection: 'row',
