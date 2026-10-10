@@ -18,21 +18,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22.13.1
           cache: npm
       - run: npm ci
-      # Informative, not a gate. The advisories in this tree sit inside Expo's
-      # own dependencies (uuid via xcode via @expo/config-plugins), which this
-      # project cannot fix, and expo and its CLI are in `dependencies`, so a
-      # blocking audit would fail every PR on the first high advisory upstream.
-      # --omit=dev is not used for the same reason: it would hide nothing of
-      # Expo's and only skip the test tooling.
-      - name: Dependency audit (non-blocking)
+      # Check runtime and test tooling. High/critical advisories remain blocking
+      # until resolved or handled through a documented, scoped exception.
+      - name: Dependency audit
         run: npm audit --audit-level=high
-        continue-on-error: true
       # Pinned so a new expo-doctor release cannot change what CI checks. Two of
       # its checks (the app.json schema, fetched from exp.host, and the package
       # metadata from reactnative.directory) need network and fail spuriously
@@ -51,8 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22.13.1
           cache: npm
