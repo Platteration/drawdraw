@@ -151,6 +151,17 @@ try {
     }
   }
 
+  // Returning home immediately after an edit must flush the debounced save.
+  await page.getByText('Profile', { exact: true }).click();
+  const fittedPath = await page.locator('svg path').first().getAttribute('d');
+  await page.getByText('Portraits', { exact: false }).click();
+  await page.getByText('Choose a portrait', { exact: true }).waitFor();
+  await page.locator('img').first().click();
+  await page.getByText('Fit to face', { exact: true }).waitFor();
+  await page.waitForTimeout(600);
+  const reopenedPath = await page.locator('svg path').first().getAttribute('d');
+  check('closing immediately after an edit preserves the guide', reopenedPath === fittedPath);
+
   await tap('Build');
   await tap('Jaw'); // a Pro-gated construction line
   const paywall = await page.locator('body').innerText();

@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Pressable,
   ScrollView,
@@ -10,8 +11,6 @@ import {
   View,
 } from 'react-native';
 import { captureRef } from 'react-native-view-shot';
-import * as MediaLibrary from 'expo-media-library/legacy';
-import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 
 import GuideOverlay from '../components/GuideOverlay';
@@ -29,6 +28,7 @@ import {
   PROPORTION_PRESETS,
 } from '../lib/headModel';
 import { saveSettings } from '../lib/storage';
+import { offerExport } from '../lib/exports';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 
 const THIRDS = [1 / 3, 2 / 3];
@@ -153,12 +153,49 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     ]
   );
 
+  const saveTimer = useRef(null);
+  const latestSettings = useRef(settings);
+  latestSettings.current = settings;
+  const saveErrorShown = useRef(false);
+  const persist = useCallback(async (value) => {
+    try {
+      await saveSettings(project.id, value);
+      saveErrorShown.current = false;
+    } catch (error) {
+      if (!saveErrorShown.current) {
+        saveErrorShown.current = true;
+        Alert.alert('Drawing not saved', 'Your latest guide changes could not be saved. Keep this drawing open, free some storage, then try returning to Portraits again.');
+      }
+      throw error;
+    }
+  }, [project.id]);
+
   useEffect(() => {
-    const id = setTimeout(() => {
-      saveSettings(project.id, settings).catch(() => {});
+    saveTimer.current = setTimeout(() => {
+      persist(settings).catch(() => {}); // persist reports failures visibly.
     }, 600);
-    return () => clearTimeout(id);
-  }, [project.id, settings]);
+    return () => clearTimeout(saveTimer.current);
+  }, [persist, settings]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        clearTimeout(saveTimer.current);
+        persist(latestSettings.current).catch(() => {});
+      }
+    });
+    return () => subscription.remove();
+  }, [persist]);
+
+  const closeDrawing = async () => {
+    clearTimeout(saveTimer.current);
+    try {
+      await persist(latestSettings.current);
+      onClose();
+    } catch {
+      // Keep the unsaved drawing open so the user can retry or export it.
+    }
+  };
 
   const guides = {
     horizontal: showHorizontal ? hGuides : [],
@@ -229,40 +266,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     setBusy(true);
     try {
       const uri = await captureRef(ref, { format: 'png', quality: 1, ...size });
-
-      Alert.alert(name, 'Where do you want it?', [
-        {
-          text: 'Save to Photos',
-          onPress: async () => {
-            try {
-              const permission = await MediaLibrary.requestPermissionsAsync();
-              if (!permission.granted) {
-                Alert.alert('Permission needed', 'Allow photo library access to save exports.');
-                return;
-              }
-              await MediaLibrary.saveToLibraryAsync(uri);
-              Alert.alert('Saved', `${name} was saved to your photo library.`);
-            } catch (err) {
-              Alert.alert('Save failed', String(err?.message ?? err));
-            }
-          },
-        },
-        {
-          text: 'Share…',
-          onPress: async () => {
-            try {
-              if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(uri, { mimeType: 'image/png' });
-              } else {
-                Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
-              }
-            } catch (err) {
-              Alert.alert('Share failed', String(err?.message ?? err));
-            }
-          },
-        },
-        { text: 'Cancel', style: 'cancel' },
-      ]);
+      await offerExport(uri, name);
     } catch (err) {
       Alert.alert('Export failed', String(err?.message ?? err));
     } finally {
@@ -306,7 +310,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={onClose} hitSlop={12}>
+        <Pressable onPress={closeDrawing} hitSlop={12}>
           <Text style={styles.headerAction}>‹ Portraits</Text>
         </Pressable>
         <Text style={type.title}>Three-segment head</Text>

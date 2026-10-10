@@ -52,7 +52,9 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
   const [recents, setRecents] = useState([]);
 
   const refresh = useCallback(() => {
-    listProjects().then(setRecents);
+    listProjects().then(setRecents).catch(() => {
+      Alert.alert('Could not load drawings', 'Saved storage could not be read. Your saved index has not been replaced. Try reopening the app.');
+    });
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -64,19 +66,19 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
       Alert.alert('Unsupported image', 'Could not read the dimensions of that image.');
       return;
     }
-    onOpenProject(await createProject(asset));
+    const project = await createProject(asset);
+    if (project.persistenceWarning) Alert.alert('Portrait is temporary', project.persistenceWarning);
+    onOpenProject(project);
   };
 
   const pickFromLibrary = async () => {
     if (busy) return;
     setBusy(true);
     try {
-      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission needed', 'Allow photo access to pick a portrait.');
-        return;
-      }
+      // The system picker grants access to the selected image, not the whole library.
       await openAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
+    } catch (error) {
+      Alert.alert('Could not open portrait', String(error?.message ?? error));
     } finally {
       setBusy(false);
     }
@@ -91,7 +93,9 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
         Alert.alert('Permission needed', 'Allow camera access to take a portrait.');
         return;
       }
-      await openAsset(await ImagePicker.launchCameraAsync({ quality: 1 }));
+      await openAsset(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 }));
+    } catch (error) {
+      Alert.alert('Could not take photo', String(error?.message ?? error));
     } finally {
       setBusy(false);
     }
@@ -104,8 +108,12 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
         text: 'Remove',
         style: 'destructive',
         onPress: async () => {
-          await deleteProject(project.id);
-          refresh();
+          try {
+            await deleteProject(project.id);
+            refresh();
+          } catch (error) {
+            Alert.alert('Could not remove drawing', String(error?.message ?? error));
+          }
         },
       },
     ]);
