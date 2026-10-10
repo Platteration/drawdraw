@@ -136,15 +136,32 @@ succeeds. Web is a test surface rather than a shipping target.
 `production` for store builds. Production build numbers are managed remotely by EAS
 and increment automatically; the user-visible version remains in `app.json`.
 
+Use EAS CLI 24.12.1 from the intended toolchain and check `eas --version` before
+building. In the prepared Codex cloud environment, setup installs a separate CLI
+with reviewed official dependency patches. Select that installation:
+
+```bash
+export PATH=/workspace/.drawdraw-release-tools/node_modules/.bin:$PATH
+eas --version
+```
+
+That prefix is specific to the prepared environment. Elsewhere, an upstream command
+such as `npx --yes eas-cli@24.12.1` uses its own dependencies and does **not** inherit
+the reviewed overrides. The published CLI pins older tar, nanoid and other packages
+with known advisories; selecting the same CLI version alone does not reproduce the
+patched toolchain. Review build-tool dependencies when preparing another environment.
+Remaining upstream tooling advisories also mean the reviewed installation is not
+claimed to be advisory-free.
+
 Before building, authenticate with the intended Expo account and link this checkout to
-its actual EAS project using `npx --yes eas-cli@24.12.1 init`. Configure signing for
+its actual EAS project using `eas init`. Configure signing for
 `com.platteration.drawdraw`; internal iOS builds also need registered test devices.
 The repository does not contain account IDs or signing credentials.
 
 ```bash
-npx --yes eas-cli@24.12.1 build --profile preview --platform all
+eas build --profile preview --platform all
 # After completing docs/NATIVE_VALIDATION.md on iOS and Android:
-npx --yes eas-cli@24.12.1 build --profile production --platform all
+eas build --profile production --platform all
 ```
 
 These commands request builds, not store publication. Store submission additionally

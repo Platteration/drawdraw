@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { purchases } from './purchases';
@@ -35,7 +35,20 @@ async function read() {
 }
 
 async function write(entitlements) {
-  await AsyncStorage.setItem(KEY, JSON.stringify(entitlements));
+  try {
+    await AsyncStorage.setItem(KEY, JSON.stringify(entitlements));
+  } catch (error) {
+    // Removing a stale grant is a safe fallback when replacing it fails.
+    if (entitlements.pro === false) {
+      try {
+        await AsyncStorage.removeItem(KEY);
+        return;
+      } catch {
+        // Preserve the persistence error for the caller to report.
+      }
+    }
+    throw error;
+  }
 }
 
 /**
@@ -47,17 +60,30 @@ async function write(entitlements) {
 export function useEntitlements() {
   const [pro, setPro] = useState(false);
   const [ready, setReady] = useState(false);
+  const revision = useRef(0);
+  const cacheWrites = useRef(Promise.resolve());
 
   useEffect(() => {
+    let mounted = true;
+    const initialRevision = revision.current;
     read().then((e) => {
-      setPro(purchases.configured && e.pro === true);
+      if (!mounted) return;
+      if (revision.current === initialRevision) {
+        setPro(purchases.configured && e.pro === true);
+      }
       setReady(true);
     });
+    return () => { mounted = false; };
   }, []);
 
   const updateEntitlement = useCallback(async (active) => {
-    await write({ pro: active });
-    setPro(active);
+    const currentRevision = ++revision.current;
+    // Store-confirmed revocation applies even if the local cache is unavailable.
+    if (!active) setPro(false);
+    const pending = cacheWrites.current.then(() => write({ pro: active }));
+    cacheWrites.current = pending.catch(() => {});
+    await pending;
+    if (revision.current === currentRevision) setPro(active);
   }, []);
 
   const purchase = useCallback(

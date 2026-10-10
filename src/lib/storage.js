@@ -36,8 +36,56 @@ async function ensureDir() {
     throw new Error('Portrait storage is unavailable. The image has not been imported.');
   }
   const info = await FileSystem.getInfoAsync(PORTRAIT_DIR);
-  if (!info.exists) {
+  if (info.exists === false) {
     await FileSystem.makeDirectoryAsync(PORTRAIT_DIR, { intermediates: true });
+  } else if (info.exists !== true || info.isDirectory !== true) {
+    throw new Error('The portrait storage folder is unavailable. The image has not been imported.');
+  }
+}
+
+async function allocatePortrait(baseId, projects, extension) {
+  const ids = new Set(projects.map((project) => project.id));
+  const portraitUris = new Set(projects.map((project) => project.image.uri));
+  // Native copyAsync can overwrite files and remove existing directories. Never
+  // reuse a known portrait path or any occupied destination, including orphans.
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const id = attempt === 0 ? baseId : `${baseId}-${attempt}`;
+    const uri = `${PORTRAIT_DIR}${id}.${extension}`;
+    if (ids.has(id) || portraitUris.has(uri)) continue;
+    const info = await FileSystem.getInfoAsync(uri);
+    if (info.exists === false) return { id, uri };
+    if (info.exists !== true) {
+      throw new Error('The portrait destination could not be checked. The image has not been imported.');
+    }
+  }
+  throw new Error('An unused portrait filename could not be found. Please try importing the image again.');
+}
+
+function isOwnedPortraitUri(uri) {
+  if (Platform.OS === 'web' || !FileSystem.documentDirectory ||
+    typeof uri !== 'string' || !uri.startsWith(PORTRAIT_DIR)) return false;
+  // Imported copies have an ASCII project ID and one image extension. A raw
+  // prefix also matches the folder itself, nested paths and ../ escapes.
+  const filename = uri.slice(PORTRAIT_DIR.length);
+  const match = /^([A-Za-z0-9_-]+)\.([A-Za-z0-9]+)$/.exec(filename);
+  return !!match && portraitExtension(uri) === match[2].toLowerCase();
+}
+
+async function inspectOwnedPortrait(uri) {
+  if (!isOwnedPortraitUri(uri)) return null;
+  const info = await FileSystem.getInfoAsync(uri);
+  if (info.exists === false) return info;
+  if (info.exists !== true || info.isDirectory !== false) {
+    throw new Error('The portrait cannot be safely deleted because its path is not a regular file.');
+  }
+  return info;
+}
+
+async function deleteOwnedPortrait(uri) {
+  // Cleanup is idempotent even if a failed copy left no file behind. Metadata
+  // must still rule out a directory before any native deletion is delegated.
+  if (await inspectOwnedPortrait(uri)) {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
   }
 }
 
@@ -214,12 +262,12 @@ export function createProject(asset) {
     // file. Native picker cache files must be copied before import succeeds.
     if (Platform.OS !== 'web') {
       await ensureDir();
-      uri = `${PORTRAIT_DIR}${id}.${portraitExtension(asset.uri)}`;
+      ({ id, uri } = await allocatePortrait(baseId, projects, portraitExtension(asset.uri)));
       try {
         await FileSystem.copyAsync({ from: asset.uri, to: uri });
       } catch (error) {
         try {
-          await FileSystem.deleteAsync(uri, { idempotent: true });
+          await deleteOwnedPortrait(uri);
         } catch {
           throw new Error(`${String(error?.message ?? error)} The partially copied portrait could not be deleted.`);
         }
@@ -238,7 +286,7 @@ export function createProject(asset) {
     } catch (error) {
       if (Platform.OS !== 'web') {
         try {
-          await FileSystem.deleteAsync(uri, { idempotent: true });
+          await deleteOwnedPortrait(uri);
         } catch {
           throw new Error('The drawing could not be saved, and its copied portrait could not be deleted.');
         }
@@ -265,9 +313,11 @@ export function deleteProject(id) {
     const projects = await readIndex();
     const target = projects.find((p) => p.id === id);
     const remaining = projects.filter((p) => p.id !== id);
+    const deletePortrait = target &&
+      !remaining.some((project) => project.image.uri === target.image.uri) &&
+      (await inspectOwnedPortrait(target.image.uri))?.exists === true;
     await writeIndex(remaining);
-    if (target?.image?.uri?.startsWith(PORTRAIT_DIR) &&
-      !remaining.some((project) => project.image.uri === target.image.uri)) {
+    if (deletePortrait) {
       try {
         await FileSystem.deleteAsync(target.image.uri, { idempotent: true });
       } catch (error) {

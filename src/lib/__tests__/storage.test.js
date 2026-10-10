@@ -32,10 +32,12 @@ const project = (id) => ({
 
 let stored;
 let backups;
+let copiedFiles;
 beforeEach(() => {
   jest.resetAllMocks();
   stored = JSON.stringify([project('first'), project('second')]);
   backups = null;
+  copiedFiles = new Set();
   Platform.OS = 'ios';
   FileSystem.documentDirectory = 'file:///documents/';
   AsyncStorage.getItem.mockImplementation(async (key) => key === RECOVERY_KEY ? backups : stored);
@@ -46,9 +48,14 @@ beforeEach(() => {
   AsyncStorage.removeItem.mockImplementation(async (key) => {
     if (key === RECOVERY_KEY) backups = null;
   });
-  FileSystem.getInfoAsync.mockResolvedValue({ exists: true });
+  FileSystem.getInfoAsync.mockImplementation(async (uri) => {
+    if (uri === 'file:///documents/portraits/') return { exists: true, isDirectory: true };
+    let referenced = false;
+    try { referenced = JSON.parse(stored).some((entry) => entry?.image?.uri === uri); } catch {}
+    return { exists: referenced || copiedFiles.has(uri), isDirectory: false };
+  });
   FileSystem.makeDirectoryAsync.mockResolvedValue(undefined);
-  FileSystem.copyAsync.mockResolvedValue(undefined);
+  FileSystem.copyAsync.mockImplementation(async ({ to }) => { copiedFiles.add(to); });
   FileSystem.deleteAsync.mockResolvedValue(undefined);
 });
 
@@ -512,4 +519,184 @@ it('retains a shared legacy portrait until its last recovered drawing is removed
   expect(await listProjects()).toEqual([]);
   expect(FileSystem.deleteAsync).toHaveBeenCalledTimes(1);
   expect(FileSystem.deleteAsync).toHaveBeenCalledWith(project('same').image.uri, { idempotent: true });
+});
+
+it.each([
+  'file:///documents/portraits/',
+  'file:///documents/portraits/.',
+  'file:///documents/portraits/..',
+  'file:///documents/portraits/../unrelated.jpg',
+  'file:///documents/portraits/nested/portrait.jpg',
+  'file:///documents/portraits/folder.jpg/',
+  'file:///documents/portraits/%2e%2e%2funrelated.jpg',
+  'file:///documents/portraits/portrait%2fother.jpg',
+  'file:///documents/portraits/portrait%5cother.jpg',
+  'file:///documents/portraits/portrait\\other.jpg',
+  'file:///documents/portraits/portrait.jpg?cache=other',
+  'file:///documents/portraits/portrait.jpg#other',
+  'file:///documents/portraits/unrelated.txt',
+  'file:///documents/other.jpg',
+  'file:///cache/portrait.jpg',
+])('removes only the index entry and leaves an unmanaged portrait path unchanged: %s', async (uri) => {
+  const badPath = { ...project('bad-path'), image: { ...asset, uri } };
+  stored = JSON.stringify([badPath, project('second')]);
+  await expect(listProjects()).resolves.toEqual([badPath, project('second')]);
+  await deleteProject('bad-path');
+  expect(await listProjects()).toEqual([project('second')]);
+  expect(FileSystem.getInfoAsync).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('does not unlink a managed-looking folder or remove its project', async () => {
+  const original = stored;
+  FileSystem.getInfoAsync.mockResolvedValueOnce({ exists: true, isDirectory: true });
+  await expect(deleteProject('first')).rejects.toThrow(/not a regular file/);
+  expect(stored).toBe(original);
+  expect(FileSystem.getInfoAsync).toHaveBeenCalledWith(project('first').image.uri);
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('preserves the drawing when native file metadata cannot be checked', async () => {
+  const original = stored;
+  FileSystem.getInfoAsync.mockRejectedValueOnce(new Error('File metadata unavailable'));
+  await expect(deleteProject('first')).rejects.toThrow('File metadata unavailable');
+  expect(stored).toBe(original);
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('fails visibly rather than blindly unlinking a file with unknown metadata', async () => {
+  const original = stored;
+  FileSystem.getInfoAsync.mockResolvedValueOnce({ exists: true });
+  await expect(deleteProject('first')).rejects.toThrow(/not a regular file/);
+  expect(stored).toBe(original);
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('allows a missing portrait entry to be removed without an unlink', async () => {
+  FileSystem.getInfoAsync.mockResolvedValueOnce({ exists: false, isDirectory: false });
+  await deleteProject('first');
+  expect(await listProjects()).toEqual([project('second')]);
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('does not inspect or unlink a shared portrait before its final project is removed', async () => {
+  const shared = { ...project('second'), image: project('first').image };
+  stored = JSON.stringify([project('first'), shared]);
+  await deleteProject('first');
+  expect(await listProjects()).toEqual([shared]);
+  expect(FileSystem.getInfoAsync).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('does not call native file cleanup for web projects', async () => {
+  Platform.OS = 'web';
+  await deleteProject('first');
+  expect(await listProjects()).toEqual([project('second')]);
+  expect(FileSystem.getInfoAsync).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('keeps a recovered portrait URI reserved even when its project id changed and its file is missing', async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(12345);
+  const recovered = { ...project('p9ix-recovered-1'), image: project('p9ix').image };
+  stored = JSON.stringify([recovered]);
+  FileSystem.getInfoAsync.mockImplementation(async (uri) => ({
+    exists: uri === 'file:///documents/portraits/',
+    isDirectory: uri === 'file:///documents/portraits/',
+  }));
+  const added = await createProject(asset);
+  expect(added.id).toBe('p9ix-1');
+  expect(added.image.uri).toBe('file:///documents/portraits/p9ix-1.jpg');
+  expect(await listProjects()).toEqual([added, recovered]);
+  expect(FileSystem.getInfoAsync).not.toHaveBeenCalledWith(recovered.image.uri);
+  expect(FileSystem.copyAsync).toHaveBeenCalledWith({ from: asset.uri, to: added.image.uri });
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it.each([false, true])('does not overwrite an unindexed existing destination (isDirectory: %s)', async (isDirectory) => {
+  jest.spyOn(Date, 'now').mockReturnValue(12345);
+  const occupied = 'file:///documents/portraits/p9ix.jpg';
+  const original = JSON.parse(stored);
+  FileSystem.getInfoAsync.mockImplementation(async (uri) => {
+    if (uri === 'file:///documents/portraits/') return { exists: true, isDirectory: true };
+    return { exists: uri === occupied, isDirectory: uri === occupied && isDirectory };
+  });
+  const added = await createProject(asset);
+  expect(added.id).toBe('p9ix-1');
+  expect(added.image.uri).toBe('file:///documents/portraits/p9ix-1.jpg');
+  expect(await listProjects()).toEqual([added, ...original]);
+  expect(FileSystem.getInfoAsync).toHaveBeenCalledWith(occupied);
+  expect(FileSystem.copyAsync).toHaveBeenCalledWith({ from: asset.uri, to: added.image.uri });
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+});
+
+it('reports an exhausted destination search without overwriting or looping indefinitely', async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(12345);
+  const original = stored;
+  FileSystem.getInfoAsync.mockImplementation(async (uri) => ({
+    exists: true, isDirectory: uri === 'file:///documents/portraits/',
+  }));
+  await expect(createProject(asset)).rejects.toThrow(/unused portrait filename/);
+  expect(FileSystem.getInfoAsync).toHaveBeenCalledTimes(101);
+  expect(stored).toBe(original);
+  expect(FileSystem.copyAsync).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+it.each([{}, { exists: null }])('does not import when the destination existence is unknown: %p', async (info) => {
+  const original = stored;
+  FileSystem.getInfoAsync.mockResolvedValueOnce({ exists: true, isDirectory: true }).mockResolvedValueOnce(info);
+  await expect(createProject(asset)).rejects.toThrow(/portrait destination could not be checked/);
+  expect(stored).toBe(original);
+  expect(FileSystem.copyAsync).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+it('preserves the index and source when destination metadata cannot be read', async () => {
+  const original = stored;
+  FileSystem.getInfoAsync.mockResolvedValueOnce({ exists: true, isDirectory: true })
+    .mockRejectedValueOnce(new Error('Destination metadata unavailable'));
+  await expect(createProject(asset)).rejects.toThrow('Destination metadata unavailable');
+  expect(stored).toBe(original);
+  expect(FileSystem.copyAsync).not.toHaveBeenCalled();
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+  expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+});
+
+it.each([{ exists: true, isDirectory: false }, { exists: true }, { exists: null }])(
+  'does not copy into an unavailable or unverified portrait directory: %p', async (info) => {
+    const original = stored;
+    FileSystem.getInfoAsync.mockResolvedValueOnce(info);
+    await expect(createProject(asset)).rejects.toThrow(/portrait storage folder/i);
+    expect(stored).toBe(original);
+    expect(FileSystem.makeDirectoryAsync).not.toHaveBeenCalled();
+    expect(FileSystem.copyAsync).not.toHaveBeenCalled();
+    expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
+    expect(AsyncStorage.setItem).not.toHaveBeenCalled();
+  }
+);
+
+it('creates a missing portrait directory before checking and copying a new destination', async () => {
+  FileSystem.getInfoAsync.mockResolvedValueOnce({ exists: false });
+  const added = await createProject(asset);
+  expect(FileSystem.makeDirectoryAsync).toHaveBeenCalledWith('file:///documents/portraits/', { intermediates: true });
+  expect(FileSystem.copyAsync).toHaveBeenCalledWith({ from: asset.uri, to: added.image.uri });
+  expect(await listProjects()).toEqual([added, project('first'), project('second')]);
+});
+
+it.each(['copy', 'index'])('does not recursively remove a directory during failed import cleanup (%s)', async (failure) => {
+  const original = stored;
+  FileSystem.getInfoAsync.mockResolvedValueOnce({ exists: true, isDirectory: true })
+    .mockResolvedValueOnce({ exists: false })
+    .mockResolvedValueOnce({ exists: true, isDirectory: true });
+  if (failure === 'copy') FileSystem.copyAsync.mockRejectedValueOnce(new Error('Copy failed'));
+  else AsyncStorage.setItem.mockRejectedValueOnce(new Error('Index write failed'));
+  await expect(createProject(asset)).rejects.toThrow(/portrait could not be deleted/);
+  expect(stored).toBe(original);
+  expect(FileSystem.deleteAsync).not.toHaveBeenCalled();
 });

@@ -17,6 +17,7 @@ The browser smoke test protects the shared React/UI path, but it cannot prove na
 - Delete or move the original source photo when practical and confirm the saved project still opens from DrawDraw's durable copy.
 - In a test build with a partly damaged project index, confirm readable drawings remain available for export. Recover them, verify the original index is retained, and confirm pending edits save. Remove recovery copies separately and verify current drawings remain intact.
 - Recover legacy drawings with colliding identifiers or a shared portrait file. Edit/remove one and confirm the other keeps its own settings and can still open its portrait.
+- In a test build, remove a damaged record whose portrait URI names the portraits directory or a nested path. Confirm no folder or unrelated file is deleted. If a valid portrait filename actually names a directory, confirm removal reports the problem and preserves the index. Import with an occupied destination filename and confirm the existing portrait remains unchanged.
 - Simulate a failed save or recovery write. Confirm the editor keeps the latest work open, shows the error, and permits export and retry.
 
 ## Fit and gestures
@@ -57,6 +58,7 @@ The repository ships without a billing provider. This remains a paid-release blo
 - Test a completed purchase, cancellation, pending payment, failed payment, restore on reinstall, and an account with no purchase. Only a confirmed active Pro entitlement may unlock the paid tools.
 - Implement and test entitlement refresh for refunds and revocations, including relaunch and return from the background. The local entitlement cache alone is not store verification.
 - Test offline access after a confirmed purchase and verify the expected behavior after store validation reports that Pro is no longer active.
+- Delay the initial cache read and entitlement writes while restoring a revoked purchase. Confirm the old cache cannot reactivate Pro, writes remain ordered, and a failed cache replacement falls back to removing the stale grant. If replacement and removal both fail, live access stays revoked and the error is visible; a future launch still requires store refresh because that cache could not be cleared.
 
 ## Store and privacy review
 
