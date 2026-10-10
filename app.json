@@ -22,14 +22,16 @@
         "expo-image-picker",
         {
           "photosPermission": "DrawDraw needs access to your photos so you can pick a portrait to overlay drawing guides on.",
-          "cameraPermission": "DrawDraw needs camera access so you can take a portrait photo to overlay drawing guides on."
+          "cameraPermission": "DrawDraw needs camera access so you can take a portrait photo to overlay drawing guides on.",
+          "microphonePermission": false
         }
       ],
       [
         "expo-media-library",
         {
           "savePhotosPermission": "DrawDraw saves your exported guide overlays and tracing layers to your photo library.",
-          "isAccessMediaLocationEnabled": false
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": ["photo"]
         }
       ],
       [
