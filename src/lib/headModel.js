@@ -85,7 +85,9 @@ export const ELEMENTS = [
 
 export const DEFAULT_ELEMENTS = { segments: true, center: true, eyeLine: true };
 
-const rad = (deg) => (deg * Math.PI) / 180;
+// Reduce degrees before multiplication: finite saved angles can otherwise
+// overflow radians, even though their equivalent rotation is well defined.
+const rad = (deg) => ((deg % 360) * Math.PI) / 180;
 
 function matMul(a, b) {
   const out = [

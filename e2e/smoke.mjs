@@ -568,6 +568,10 @@ try {
   await openDrawing.focus();
   await page.keyboard.press('Enter');
   await page.getByText('Fit to face', { exact: true }).waitFor();
+  // Navigation text renders before the editor's layout callback. Wait for
+  // that readiness state and retain the exact enabled-control assertion.
+  const reopenedGuide = page.getByRole('button', { name: 'Guide only transparent', exact: true });
+  await page.waitForFunction((button) => button.getAttribute('aria-disabled') !== 'true', await reopenedGuide.elementHandle());
   check('a named portrait can be reopened with the keyboard', await page.getByRole('button', { name: 'Guide only transparent', exact: true }).isEnabled());
 
   check('no console or page errors', consoleErrors.length === 0, consoleErrors.slice(0, 3).join(' | '));

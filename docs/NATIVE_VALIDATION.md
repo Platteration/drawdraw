@@ -34,6 +34,7 @@ The browser smoke test protects the shared React/UI path, but it cannot prove na
 ## Export and sharing
 
 - Export Photo + guide, Guide only, and Tracing layer.
+- Immediately after opening/importing a portrait, confirm each photo-dependent export waits for its own image to load and displays a loading message. With a missing/corrupt photo, confirm the failure message stays visible, reopening retries, and Guide only (and Pro turnaround) remain available.
 - Inspect each exported image at full resolution. Confirm framing matches the editor, transparency is preserved where promised, and no draft-quality geometry appears.
 - Save an export to the photo library and confirm it is readable there.
 - Share an export through the system share sheet and complete a share to at least one target app.

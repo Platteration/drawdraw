@@ -166,3 +166,50 @@ describe('projectLandmarks', () => {
     expect(childNose.y).toBeLessThan(adultNose.y); // a child's features sit lower
   });
 });
+
+describe('equivalent rotations', () => {
+  it.each([
+    [1e308, 15, 30],
+    [-1e308, 15, 30],
+    [35, 15, Number.MAX_VALUE],
+    [35, 15, -Number.MAX_VALUE],
+    [35, 1e308, 30],
+    [35, -1e308, 30],
+  ])('keeps finite geometry for large finite angles (%s, %s, %s)', (yaw, pitch, roll) => {
+    const matrix = rotationMatrix(yaw, pitch, roll);
+    const equivalentMatrix = rotationMatrix(yaw % 360, pitch % 360, roll % 360);
+    expect(matrix.flat().every(Number.isFinite)).toBe(true);
+    for (let i = 0; i < 3; i += 1) {
+      expect(Math.hypot(...matrix[i])).toBeCloseTo(1, 10);
+      for (let j = 0; j < 3; j += 1) expect(matrix[i][j]).toBeCloseTo(equivalentMatrix[i][j], 10);
+    }
+    for (const preset of PROPORTION_PRESETS) {
+      const options = { elements: ALL_ELEMENTS, proportions: preset.values };
+      const points = allPoints(buildHeadWireframe(yaw, pitch, roll, options));
+      expect(points.length).toBeGreaterThan(0);
+      expect(points.every((point) => [point.x, point.y, point.z].every(Number.isFinite))).toBe(true);
+      // HeadGuide projects model points into the photo view before formatting
+      // SVG coordinates. An ordinary viewport must retain finite coordinates.
+      const pixelsPerUnit = (0.6 * 600) / HEAD_HEIGHT_UNITS;
+      expect(points.every((point) =>
+        Number.isFinite(200 + point.x * pixelsPerUnit) &&
+        Number.isFinite(270 - point.y * pixelsPerUnit)
+      )).toBe(true);
+      expect(projectLandmarks(yaw, pitch, roll, preset.values).every((point) =>
+        Number.isFinite(point.x) && Number.isFinite(point.y)
+      )).toBe(true);
+    }
+  });
+
+  it.each([
+    [35 + 360 * 4, -12 - 360 * 2, 88 + 360 * 3],
+    [-155 - 360 * 3, 63 + 360 * 2, -41 - 360 * 4],
+    [360 * 1000, -360 * 1000, 360 * 1000],
+  ])('preserves ordinary rotations after multiple turns (%s, %s, %s)', (yaw, pitch, roll) => {
+    const matrix = rotationMatrix(yaw, pitch, roll);
+    const equivalent = rotationMatrix(yaw % 360, pitch % 360, roll % 360);
+    for (let i = 0; i < 3; i += 1) {
+      for (let j = 0; j < 3; j += 1) expect(matrix[i][j]).toBeCloseTo(equivalent[i][j], 10);
+    }
+  });
+});

@@ -42,7 +42,7 @@ function nodes(tree) {
   return [tree, ...nodes(tree.props.children)];
 }
 
-function mount({ pro = false, width = 1200, height = 1800, settings = null } = {}) {
+function mount({ pro = false, width = 1200, height = 1800, settings = null, loadImages = true } = {}) {
   const render = () => {
     stateIndex = 0;
     refIndex = 0;
@@ -51,6 +51,11 @@ function mount({ pro = false, width = 1200, height = 1800, settings = null } = {
   renderMounted = render;
   const initial = render();
   nodes(initial).find((node) => node.props.onLayout).props.onLayout({ nativeEvent: { layout: { width: 390, height: 500 } } });
+  if (loadImages) {
+    // Existing export scenarios start after successful RN Image loads. Tests
+    // below keep these events pending or send onError instead of onLoad.
+    nodes(render()).filter((node) => node.type === 'Image').forEach((node) => node.props.onLoad?.());
+  }
   return render();
 }
 
@@ -211,4 +216,68 @@ it('keeps one export choice active and ignores another export until cancellation
   await next.pending;
   expect(captureRef).toHaveBeenCalledTimes(2);
   expect(releaseCapture).toHaveBeenCalledTimes(2);
+});
+
+it.each(['Photo\n+ guide', 'Tracing\nlayer'])('does not capture %s before its image has loaded', async (label) => {
+  const tree = mount({ pro: true, loadImages: false });
+  const { pending, dialog } = await chooseExport(tree, label);
+  // Finish the old implementation's dialog so a regression fails on capture,
+  // rather than leaving an unresolved test promise.
+  dialog?.[2].find((button) => button.text === 'Cancel').onPress();
+  await pending;
+  expect(captureRef).not.toHaveBeenCalled();
+  expect(nodes(tree).find((node) => node.props.label === label).props.disabled).toBe(true);
+  expect(nodes(tree).find((node) => node.props.label === 'Guide only\ntransparent').props.disabled).toBe(false);
+  expect(nodes(tree).find((node) => node.props.label === 'Turnaround\nsix views').props.disabled).toBe(false);
+  expect(nodes(tree).some((node) => typeof node.props.children === 'string' && node.props.children.includes('Loading photo layers'))).toBe(true);
+});
+
+it('waits for each capture image independently even after the visible photo loads', async () => {
+  const tree = mount({ loadImages: false });
+  const images = nodes(tree).filter((node) => node.type === 'Image');
+  expect(images).toHaveLength(3);
+  images[0].props.onLoad?.();
+  let current = renderMounted();
+  expect(nodes(current).find((node) => node.props.label === 'Photo\n+ guide').props.disabled).toBe(true);
+  expect(nodes(current).find((node) => node.props.label === 'Tracing\nlayer').props.disabled).toBe(true);
+  images[1].props.onLoad();
+  current = renderMounted();
+  expect(nodes(current).find((node) => node.props.label === 'Photo\n+ guide').props.disabled).toBe(false);
+  expect(nodes(current).find((node) => node.props.label === 'Tracing\nlayer').props.disabled).toBe(true);
+  const { pending } = await chooseExport(current, 'Photo\n+ guide', 'Cancel');
+  await pending;
+  expect(captureRef).toHaveBeenCalledTimes(1);
+  images[2].props.onLoad();
+  current = renderMounted();
+  expect(nodes(current).find((node) => node.props.label === 'Tracing\nlayer').props.disabled).toBe(false);
+  expect(nodes(current).some((node) => typeof node.props.children === 'string' && node.props.children.includes('Loading photo layers'))).toBe(false);
+});
+
+it.each([
+  [1, 'Photo\n+ guide', 'Tracing\nlayer'],
+  [2, 'Tracing\nlayer', 'Photo\n+ guide'],
+])('keeps working exports available when image %s fails', async (index, failedLabel, readyLabel) => {
+  const tree = mount({ pro: true });
+  const image = nodes(tree).filter((node) => node.type === 'Image')[index];
+  image.props.onError?.({ nativeEvent: { error: 'Photo could not be decoded' } });
+  const current = renderMounted();
+  expect(nodes(current).find((node) => node.props.label === failedLabel).props.disabled).toBe(true);
+  expect(nodes(current).find((node) => node.props.label === readyLabel).props.disabled).toBe(false);
+  expect(nodes(current).some((node) => typeof node.props.children === 'string' && node.props.children.includes('A photo layer could not load'))).toBe(true);
+  await nodes(current).find((node) => node.props.label === failedLabel).props.onPress();
+  expect(captureRef).not.toHaveBeenCalled();
+  for (const label of [readyLabel, 'Guide only\ntransparent', 'Turnaround\nsix views']) {
+    const { pending } = await chooseExport(renderMounted(), label, 'Cancel');
+    await pending;
+  }
+  expect(captureRef).toHaveBeenCalledTimes(3);
+});
+
+it('waits for a new successful load after a capture image starts loading again', () => {
+  const tree = mount();
+  const image = nodes(tree).filter((node) => node.type === 'Image')[1];
+  image.props.onLoadStart?.();
+  expect(nodes(renderMounted()).find((node) => node.props.label === 'Photo\n+ guide').props.disabled).toBe(true);
+  image.props.onLoad();
+  expect(nodes(renderMounted()).find((node) => node.props.label === 'Photo\n+ guide').props.disabled).toBe(false);
 });

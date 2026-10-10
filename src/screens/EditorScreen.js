@@ -90,6 +90,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const [playing, setPlaying] = useState(false);
 
   const [viewport, setViewport] = useState(null); // area available for the image
+  const [photoLayers, setPhotoLayers] = useState({ combined: 'loading', tracing: 'loading' });
   const [busy, setBusy] = useState(false);
   const [saveError, setSaveError] = useState(null);
   const [closing, setClosing] = useState(false);
@@ -286,7 +287,16 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     }
   };
 
-  const exportView = async (ref, name, size) => {
+  // Each off-screen Image decodes independently. view-shot does not wait for
+  // those loads, and the visible photo loading does not make a capture ready.
+  const photoLoadEvents = (layer) => ({
+    onLoadStart: () => setPhotoLayers((current) => ({ ...current, [layer]: 'loading' })),
+    onLoad: () => setPhotoLayers((current) => ({ ...current, [layer]: 'loaded' })),
+    onError: () => setPhotoLayers((current) => ({ ...current, [layer]: 'error' })),
+  });
+
+  const exportView = async (ref, name, size, photoLayer) => {
+    if (photoLayer && photoLayers[photoLayer] !== 'loaded') return;
     if (exportingRef.current || !ref.current) return;
     exportingRef.current = true;
     setBusy(true);
@@ -665,12 +675,19 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         </ScrollView>
 
         <SectionLabel>Export · PNG at full resolution</SectionLabel>
+        {ready && Object.values(photoLayers).some((status) => status !== 'loaded') && (
+          <Text style={styles.saveWarningText} accessibilityLiveRegion="polite">
+            {Object.values(photoLayers).includes('error')
+              ? 'A photo layer could not load. Reopen the portrait to retry; guide-only exports still work.'
+              : 'Loading photo layers… You can export the guide now.'}
+          </Text>
+        )}
         <View style={styles.exportRow}>
           <PrimaryButton
             label={'Photo\n+ guide'}
             tone="quiet"
-            disabled={busy || !ready}
-            onPress={() => exportView(combinedRef, 'Photo with guide', photoSize)}
+            disabled={busy || !ready || photoLayers.combined !== 'loaded'}
+            onPress={() => exportView(combinedRef, 'Photo with guide', photoSize, 'combined')}
           />
           <PrimaryButton
             label={'Guide only\ntransparent'}
@@ -682,8 +699,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
           <PrimaryButton
             label={'Tracing\nlayer'}
             tone="quiet"
-            disabled={busy || !ready}
-            onPress={() => exportView(tracingRef, 'Tracing layer', photoSize)}
+            disabled={busy || !ready || photoLayers.tracing !== 'loaded'}
+            onPress={() => exportView(tracingRef, 'Tracing layer', photoSize, 'tracing')}
           />
           <PrimaryButton
             label={pro ? 'Turnaround\nsix views' : 'Turnaround\nsix views ✦'}
@@ -713,7 +730,11 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         {ready && (
           <>
             <View ref={combinedRef} collapsable={false} style={{ width: displayW, height: displayH }}>
-              <Image source={{ uri: image.uri }} style={{ width: displayW, height: displayH }} />
+              <Image
+                source={{ uri: image.uri }}
+                style={{ width: displayW, height: displayH }}
+                {...photoLoadEvents('combined')}
+              />
               {renderGuides()}
             </View>
             <View
@@ -731,6 +752,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
               <Image
                 source={{ uri: image.uri }}
                 style={{ width: displayW, height: displayH, opacity: tracingOpacity }}
+                {...photoLoadEvents('tracing')}
               />
             </View>
           </>
