@@ -6,6 +6,7 @@ import { colors, radius } from '../theme';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS } from '../lib/headModel';
 import { FREE_FEATURES, PRO_FEATURES } from '../lib/pro';
 import { PRODUCTS } from '../lib/purchases';
+import { account, useAccount } from '../lib/account';
 
 const ALL_ELEMENTS = {
   center: true,
@@ -52,6 +53,7 @@ function FullHead({ size = 150 }) {
 export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
   const [busy, setBusy] = useState(false);
   const product = PRODUCTS.pro;
+  const acct = useAccount();
 
   const run = async (action, label) => {
     if (busy) return;
@@ -64,6 +66,39 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
         err?.code === 'not_configured' ? 'Not available yet' : `${label} failed`,
         String(err?.message ?? err)
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Sign in with the Google account used in the studio's shop on the web: a
+  // Pro bought there unlocks here. Closes the paywall when it does.
+  const signIn = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const result = await account.signIn();
+      if (result?.cancelled) return;
+      if (account.hasPro()) {
+        onClose();
+      } else {
+        Alert.alert(
+          'Signed in',
+          `${result.user?.email || 'This account'} has no Pro purchase yet. Unlock Pro here, or sign in with the account you bought it with.`
+        );
+      }
+    } catch (err) {
+      Alert.alert('Sign-in failed', String(err?.message ?? err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const signOut = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await account.signOut();
     } finally {
       setBusy(false);
     }
@@ -107,6 +142,28 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }) {
         <Text style={styles.fine}>
           One payment, not a subscription. Your drawings and exports are never watermarked.
         </Text>
+
+        {acct.configured ? (
+          <View style={styles.account}>
+            {acct.status === 'signed-in' ? (
+              <>
+                <Text style={styles.accountText} numberOfLines={1}>
+                  {`Signed in as ${acct.user?.email || acct.user?.name || 'your account'}`}
+                </Text>
+                <Pressable onPress={signOut} disabled={busy} hitSlop={10} accessibilityRole="button">
+                  <Text style={styles.accountLink}>Sign out</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.accountText}>Already have Pro on your account?</Text>
+                <Pressable onPress={signIn} disabled={busy || acct.status === 'loading'} hitSlop={10} accessibilityRole="button">
+                  <Text style={styles.accountLink}>Sign in with Google</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={styles.footer}>
@@ -206,6 +263,26 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     textAlign: 'center',
     marginTop: 4,
+  },
+  account: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 16,
+  },
+  accountText: {
+    color: colors.graphiteSoft,
+    fontSize: 12,
+    lineHeight: 18,
+    maxWidth: '70%',
+  },
+  accountLink: {
+    color: colors.accent,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
   },
   footer: {
     paddingHorizontal: 24,

@@ -70,12 +70,18 @@ The method itself, fitting it to a photo, and all three portrait exports are fre
 one-time unlock (not a subscription) covering the full construction head, the child /
 infant / stylized proportion packs, turnaround sheets, and the step-by-step lessons.
 
-Billing is deliberately **not wired up in this repo**. `src/lib/purchases.js` defines the
-provider interface and ships a `NotConfiguredProvider` that reports honestly rather than
+In-app billing is deliberately **not wired up in this repo**. `src/lib/purchases.js` defines
+the provider interface and ships a `NotConfiguredProvider` that reports honestly rather than
 pretending to charge, so the app builds and runs without a billing SDK. Implementing
 `getProducts` / `purchase` / `restore` against StoreKit or Play Billing (directly or
 through a service such as RevenueCat) and calling `setPurchaseProvider` at startup is the
 only change needed; entitlement storage and every gate already work.
+
+Pro can also come from an **account**: the paywall signs in with Google through the same
+account service as Portrait Value Studio on the web, and a Pro bought in the studio's shop
+unlocks here on sign-in (`src/lib/account.js`, `src/lib/accountApi.js`). The row only appears
+when `EXPO_PUBLIC_ACCOUNT_API_BASE` is set at build time; see
+[docs/ACCOUNT_SETUP.md](docs/ACCOUNT_SETUP.md) for the set-up and the store-policy notes.
 
 ## Running it
 
@@ -90,7 +96,7 @@ haptics and the share sheet need a real device.
 ## Development
 
 ```bash
-npm test          # unit tests for the head model, fit solver and filenames
+npm test          # unit tests for the head model, fit solver, filenames and the account client
 npm run e2e       # build for web and drive the app in a real browser
 npm run icons     # regenerate assets/ from the head model
 ```
@@ -133,6 +139,8 @@ src/lib/fitSolver.js            Three-tap pose solver (Procrustes + search)
 src/lib/storage.js              Projects: durable image copies + settings
 src/lib/pro.js                  Entitlements and what each tier includes
 src/lib/purchases.js            Store provider seam
+src/lib/accountApi.js           The account service, as the app talks to it (pure)
+src/lib/account.js              Google sign-in, the stored session, useAccount()
 
 src/screens/HomeScreen.js       Pick a portrait, reopen recents
 src/screens/EditorScreen.js     The overlay editor and exports

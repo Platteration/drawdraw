@@ -2,6 +2,7 @@
   "expo": {
     "name": "DrawDraw",
     "slug": "drawdraw",
+    "scheme": "drawdraw",
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",

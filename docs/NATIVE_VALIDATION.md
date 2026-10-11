@@ -37,6 +37,16 @@ The browser smoke test protects the shared React/UI path, but it cannot prove na
 - Cancel the image picker and share sheet and confirm the editor state is unchanged.
 - Exercise low-connectivity/offline launch. Core editing and existing projects should remain usable because they do not require a network service.
 
+## Account and Pro from the web
+
+Only in a build made with `EXPO_PUBLIC_ACCOUNT_API_BASE` set (see `ACCOUNT_SETUP.md`); otherwise confirm the paywall shows no sign-in row.
+
+- From the paywall, sign in with Google. The system browser opens, the account chooser appears, and after choosing, the browser closes on its own and the paywall reads "Signed in as …".
+- Cancel at Google's account chooser and confirm the app returns to the paywall signed out, with no error dialog.
+- With a Pro bought on the web for that account, tap Restore purchase and confirm the paywall closes and the Pro-gated elements, presets and turnaround export are available.
+- Terminate the app, enable airplane mode, relaunch and open the editor: Pro stays on.
+- Sign out from the paywall and confirm Pro from the account is gone while a device-local store unlock, if any, remains.
+
 ## Accessibility and layout
 
 - Enable a larger system text size and confirm primary controls remain reachable.

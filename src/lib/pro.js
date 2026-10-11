@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { purchases } from './purchases';
+import { account, useAccount } from './account';
+import { PRO_ENTITLEMENT, hasEntitlement } from './accountApi';
 
 const KEY = 'drawdraw.entitlements.v1';
 
@@ -38,16 +40,20 @@ async function write(entitlements) {
 }
 
 /**
- * Entitlement state. `pro` gates the paid surface; `purchase` and `restore`
- * go through the store provider and only grant on a resolved transaction.
+ * Entitlement state. `pro` gates the paid surface. It is true when the store
+ * unlocked it on this device (`purchase` / `restore`, which only grant on a
+ * resolved transaction) or when the signed-in account owns `drawdraw.pro`,
+ * bought in the studio's shop on the web.
  */
 export function useEntitlements() {
-  const [pro, setPro] = useState(false);
+  const [localPro, setLocalPro] = useState(false);
   const [ready, setReady] = useState(false);
+  const acct = useAccount();
+  const accountPro = hasEntitlement(acct.entitlements, PRO_ENTITLEMENT);
 
   useEffect(() => {
     read().then((e) => {
-      setPro(!!e.pro);
+      setLocalPro(!!e.pro);
       setReady(true);
     });
   }, []);
@@ -55,7 +61,7 @@ export function useEntitlements() {
   const grant = useCallback(async () => {
     const entitlements = { ...(await read()), pro: true };
     await write(entitlements);
-    setPro(true);
+    setLocalPro(true);
   }, []);
 
   const purchase = useCallback(
@@ -68,10 +74,22 @@ export function useEntitlements() {
   );
 
   const restore = useCallback(async () => {
+    // A signed-in account that owns Pro restores without a store round trip.
+    if (account.configured && account.getState().status === 'signed-in') {
+      const refreshed = await account.refresh();
+      if (hasEntitlement(refreshed.entitlements, PRO_ENTITLEMENT)) return { pro: true, source: 'account' };
+      if (!purchases.configured) {
+        const error = new Error(
+          `No Pro purchase is attached to ${refreshed.user?.email || 'this account'}. If you bought it on the web, sign in here with that same Google account.`
+        );
+        error.code = 'no_purchase';
+        throw error;
+      }
+    }
     const result = await purchases.restore();
     if (result?.pro) await grant();
     return result;
   }, [grant]);
 
-  return { pro, ready, purchase, restore };
+  return { pro: localPro || accountPro, ready: ready && acct.ready, purchase, restore };
 }
