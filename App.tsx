@@ -10,13 +10,13 @@ import PaywallScreen from './src/screens/PaywallScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { setHapticsEnabled } from './src/lib/feedback';
 import { useEntitlements } from './src/lib/pro';
-import type { Project } from './src/lib/projectShape';
+import type { CreatedProject } from './src/lib/storage';
 import { resetSettings, type Settings } from './src/lib/settings';
 import { loadSettings, persistSettings } from './src/lib/settingsStore';
 import { colors } from './src/theme';
 
 export default function App() {
-  const [project, setProject] = useState<Project | null>(null);
+  const [project, setProject] = useState<CreatedProject | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null); // null while loading
   const [replayingIntro, setReplayingIntro] = useState(false);
   const [paywall, setPaywall] = useState(false);

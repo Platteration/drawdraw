@@ -113,12 +113,14 @@ const isNonEmptyString = (v: unknown): v is string => typeof v === 'string' && v
 /**
  * A range is `[lo, hi]`, and a key that has none is not in range. Destructuring
  * the second argument instead would throw a TypeError for a missing table
- * entry, which listProjects' `catch { return [] }` (storage.ts) turns into an
- * empty library that the next write makes permanent — the one failure this
- * module exists to absorb, reached by the most ordinary schema change there is
- * (a new proportion added to DEFAULT_PROPORTIONS before its range). The
- * checker now refuses that change, since PROPORTION_RANGES is a Record over
- * every proportion; the guard is what holds when a table ships wrong anyway.
+ * entry, out of every read of the index (storage.ts): the library reported
+ * unreadable, and nothing saved or imported into it, until a build put the
+ * range back. It used to be read as an empty library that the next write made
+ * permanent — the one failure this module exists to absorb, reached by the most
+ * ordinary schema change there is (a new proportion added to
+ * DEFAULT_PROPORTIONS before its range). The checker now refuses that change,
+ * since PROPORTION_RANGES is a Record over every proportion; the guard is what
+ * holds when a table ships wrong anyway.
  */
 const inRange = (v: unknown, range: Range | undefined): v is number =>
   Array.isArray(range) && isFinite_(v) && v >= range[0] && v <= range[1];
@@ -259,19 +261,20 @@ export function hasTraversal(uri: string): boolean {
 
 /**
  * The only URI `createProject` ever indexes is a `file://` path to the app's
- * own copy (storage.ts:94), and `removePortrait` already holds a deletion to
- * that same directory (:55) — so reading was laxer than writing, and the gap
+ * own copy, and storage.ts's `ownedPortrait` already holds a deletion to that
+ * one file in that directory — so reading was laxer than writing, and the gap
  * was a live one rather than a stale-record one: the home screen renders
  * `image.uri` straight into `<Image source={{ uri }}>` on every paint, so an
  * `https:` URI in the index makes an app that has no network code of its own
  * fetch a remote server once per launch. Dropping the record instead also
  * makes a portrait whose copy is gone self-healing.
  *
- * The scheme is not the whole of it. `removePortrait`'s guard is a prefix
- * test, so `file:///…/portraits/../../databases/RKStorage` passes it while
- * naming a file two directories above the one it checked; `deleteAsync`
- * resolves the `..` and deletes what it finds, and the MAX_PROJECTS truncation
- * fires that without anyone asking for a deletion at all. And an authority is
+ * The scheme is not the whole of it. A deletion guarded by a prefix test, as
+ * the one in storage.ts used to be, passes `file:///…/portraits/../../
+ * databases/RKStorage` while naming a file two directories above the one it
+ * checked, and `deleteAsync` resolves the `..` and deletes what it finds — and
+ * a thirty-item cap that has since gone fired that without anyone asking for a
+ * deletion at all. And an authority is
  * a host, not a local file: `file://attacker.example/x.png` is no more ours
  * than `https:` is. Both are refused here. The directory half of the invariant
  * stays in storage.ts, which is the module that knows where documentDirectory

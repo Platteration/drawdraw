@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
+  AppState,
   BackHandler,
   Image,
   PixelRatio,
@@ -12,12 +12,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { captureRef, releaseCapture } from 'react-native-view-shot';
-// The function API this save was written against. Since SDK 56 the package
-// root is the Asset/Album object API, and its saveToLibraryAsync is a stub
-// that throws; the legacy entry point is still the native module it was.
-import * as MediaLibrary from 'expo-media-library/legacy';
-import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
 
 import GuideOverlay from '../components/GuideOverlay';
 import DraggableGuide from '../components/DraggableGuide';
@@ -45,12 +40,13 @@ import {
   type Point2,
   type Proportions,
 } from '../lib/headModel';
-import { notify } from '../lib/confirm';
+import { confirmAction, notify } from '../lib/confirm';
 import { errorText } from '../lib/errors';
+import { offerExport } from '../lib/exports';
 import { captureSize } from '../lib/exportSize';
 import { haptics } from '../lib/feedback';
-import type { Project, ProjectSettings } from '../lib/projectShape';
-import { saveSettings } from '../lib/storage';
+import type { ProjectSettings } from '../lib/projectShape';
+import { saveSettings, type CreatedProject } from '../lib/storage';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 import { domElement, downloadFile, exportFileName, renderPng } from '../lib/webExport';
 
@@ -79,7 +75,8 @@ const VIEW_PRESETS = [
 const BUILD_ORDER = ELEMENTS.map((el) => el.key);
 
 export interface EditorScreenProps {
-  project: Project;
+  /** A saved drawing, or an `ephemeral` one opened for this session only, which has nowhere to save to. */
+  project: CreatedProject;
   onClose: () => void;
   pro?: boolean;
   onRequestPro?: () => void;
@@ -190,34 +187,94 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     ]
   );
 
-  // Debounced autosave. The timer id doubles as "there is an unsaved change":
-  // the cleanup below cancels the pending write on every keystroke-sized edit,
-  // and only the write itself clears the ref.
+  // Debounced autosave. `unsaved` holds the setup no write has confirmed
+  // yet: it is set on every change and cleared only once a write of that very
+  // value has succeeded, so a write that fails leaves it for the next flush
+  // rather than letting the editor believe it was kept.
   const pendingSave = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const latestSettings = useRef(settings);
+  const unsaved = useRef<ProjectSettings | null>(null);
+  const saveErrorShown = useRef(false);
+  const { id: projectId, ephemeral } = project;
+
+  const persist = useCallback(
+    async (value: ProjectSettings) => {
+      // A portrait that could not be kept has no record to save into, and the
+      // user has been told so (on the web, by the home screen).
+      if (!ephemeral) await saveSettings(projectId, value);
+      if (unsaved.current === value) unsaved.current = null;
+      saveErrorShown.current = false;
+    },
+    [projectId, ephemeral]
+  );
+
+  // A save in the background fails where nobody is looking: say so, once per
+  // run of failures, rather than on every slider step.
+  const reportUnsaved = useCallback(() => {
+    if (saveErrorShown.current) return;
+    saveErrorShown.current = true;
+    notify(
+      'Drawing not saved',
+      'Your latest guide changes could not be saved. Keep this drawing open, free some storage, then try returning to Portraits again.'
+    );
+  }, []);
+
+  /** Write whatever no save has confirmed yet, now. */
+  const flush = useCallback(() => {
+    clearTimeout(pendingSave.current ?? undefined);
+    pendingSave.current = null;
+    const value = unsaved.current;
+    return value ? persist(value) : Promise.resolve();
+  }, [persist]);
 
   useEffect(() => {
-    latestSettings.current = settings;
+    unsaved.current = settings;
     pendingSave.current = setTimeout(() => {
       pendingSave.current = null;
-      saveSettings(project.id, settings).catch(() => {});
+      persist(settings).catch(reportUnsaved);
     }, 600);
     return () => clearTimeout(pendingSave.current ?? undefined);
-  }, [project.id, settings]);
+  }, [persist, reportUnsaved, settings]);
 
   // Leaving the editor unmounts it, which used to cancel the pending write and
   // silently discard anything changed in the last 600 ms — moving a slider and
-  // immediately tapping '‹ Portraits' is an ordinary thing to do. Mount-scoped
-  // so it flushes once, on the way out, rather than on every settings change.
+  // immediately tapping '‹ Portraits' is an ordinary thing to do. Leaving
+  // through the editor's own ways out flushes before it goes (closeDrawing);
+  // this catches every other unmount, once, on the way out.
   useEffect(
     () => () => {
-      if (!pendingSave.current) return;
-      clearTimeout(pendingSave.current);
-      pendingSave.current = null;
-      saveSettings(project.id, latestSettings.current).catch(() => {});
+      flush().catch(() => {});
     },
-    [project.id]
+    [flush]
   );
+
+  // An app sent to the background can be killed there without another word,
+  // so whatever is unsaved is written as it goes.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') flush().catch(reportUnsaved);
+    });
+    return () => subscription.remove();
+  }, [flush, reportUnsaved]);
+
+  // '‹ Portraits' and Android's Back: the latest setup is written before the
+  // editor goes. When it cannot be, leaving is the user's call, made knowing
+  // it: staying keeps the drawing on screen to export or to try again.
+  const closeDrawing = useCallback(async () => {
+    try {
+      await flush();
+    } catch {
+      confirmAction({
+        title: 'Drawing not saved',
+        message:
+          'Your latest guide changes could not be saved. Stay to export the drawing, or to try again once there is more storage free.',
+        cancelLabel: 'Stay',
+        confirmLabel: 'Leave without saving',
+        onConfirm: onClose,
+      });
+      return;
+    }
+    onClose();
+  }, [flush, onClose]);
 
   // Android's hardware/gesture Back. Without a subscriber it falls through to
   // the default handler and closes the app instead of leaving the editor. The
@@ -232,11 +289,11 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         setMode('rotate');
         return true;
       }
-      onClose();
+      closeDrawing();
       return true;
     });
     return () => sub.remove();
-  }, [mode, onClose]);
+  }, [mode, closeDrawing]);
 
   const guides = {
     horizontal: showHorizontal ? hGuides : [],
@@ -330,72 +387,10 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         ...captureSize(size, { platform: Platform.OS, pixelRatio: PixelRatio.get() }),
       });
 
-      // captureRef writes the PNG to a temporary file and hands over the only
-      // reference to it. Nothing else deletes it on iOS, so without this each
-      // press of an export button leaves a full-resolution PNG behind for as
-      // long as the OS keeps the temp directory. Whichever way this alert
-      // ends, the file has been consumed by then.
-      let released = false;
-      const release = () => {
-        if (released) return;
-        released = true;
-        // A device's capture only; the web downloads above and never comes
-        // here. A release that throws must still let the dialog finish.
-        try {
-          releaseCapture(uri);
-        } catch {}
-      };
-
-      Alert.alert(
-        name,
-        'Where do you want it?',
-        [
-          {
-            text: 'Save to Photos',
-            onPress: async () => {
-              try {
-                // Add-only: the app never reads or enumerates the library, so
-                // it asks for the write scope alone (no 'All Photos' grant, and
-                // no runtime prompt at all on Android 13+).
-                const permission = await MediaLibrary.requestPermissionsAsync(true);
-                if (!permission.granted) {
-                  Alert.alert(
-                    'Permission needed',
-                    'Allow DrawDraw to add photos to your library to save exports.'
-                  );
-                  return;
-                }
-                await MediaLibrary.saveToLibraryAsync(uri);
-                Alert.alert('Saved', `${name} was saved to your photo library.`);
-              } catch (err) {
-                Alert.alert('Save failed', errorText(err));
-              } finally {
-                release();
-              }
-            },
-          },
-          {
-            text: 'Share…',
-            onPress: async () => {
-              try {
-                if (await Sharing.isAvailableAsync()) {
-                  await Sharing.shareAsync(uri, { mimeType: 'image/png' });
-                } else {
-                  Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
-                }
-              } catch (err) {
-                Alert.alert('Share failed', errorText(err));
-              } finally {
-                release();
-              }
-            },
-          },
-          { text: 'Cancel', style: 'cancel', onPress: release },
-        ],
-        // Android lets the dialog go by tapping outside it, which fires no
-        // button at all.
-        { onDismiss: release }
-      );
+      // Not awaited: the editor is usable again once the capture is made.
+      // offerExport keeps the temporary file until the choice made in its
+      // dialog has finished with it, and then releases it.
+      offerExport(uri, name).catch((err) => notify('Export failed', errorText(err)));
     } catch (err) {
       notify('Export failed', errorText(err));
     } finally {
@@ -443,7 +438,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable
-          onPress={onClose}
+          onPress={closeDrawing}
           hitSlop={12}
           accessibilityRole="button"
           accessibilityLabel="Back to portraits"

@@ -3,7 +3,7 @@
  * app makes, so a module whose API moves under an SDK upgrade stays green
  * there while the app throws on a device. SDK 54 and 56 did exactly that:
  * the package roots of expo-file-system and expo-media-library became object
- * APIs, and the functions src/lib/storage.ts and EditorScreen.tsx call are, at
+ * APIs, and the functions src/lib/storage.ts and src/lib/exports.ts call are, at
  * those roots, stubs documented to throw at runtime. jest-expo mocks even the
  * legacy file system, so the real modules cannot be loaded here; this reads
  * what each installed package declares instead, and holds every name the app

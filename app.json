@@ -43,7 +43,8 @@
         "expo-media-library",
         {
           "savePhotosPermission": "DrawDraw saves your exported guide overlays and tracing layers to your photo library.",
-          "isAccessMediaLocationEnabled": false
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": ["photo"]
         }
       ],
       "./plugins/withDebugInternet",

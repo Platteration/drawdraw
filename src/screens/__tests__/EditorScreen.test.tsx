@@ -6,7 +6,16 @@
  */
 import React from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
-import { ActivityIndicator, Alert, BackHandler, PixelRatio, Platform, StyleSheet } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  BackHandler,
+  PixelRatio,
+  Platform,
+  StyleSheet,
+  type AppStateStatus,
+} from 'react-native';
 
 jest.mock('react-native-view-shot', () => ({
   captureRef: jest.fn(async () => 'file:///tmp/export.png'),
@@ -54,6 +63,7 @@ let backHandlers: {
   handler: (event: typeof BACK_PRESS) => boolean | null | undefined;
 }[] = [];
 let mounted: ReactTestRenderer[] = [];
+let appStateHandlers: ((state: AppStateStatus) => void)[] = [];
 
 /** `value`, which the test needs to be there: a missing one fails the test here, by name. */
 function found<T>(value: T | null | undefined, what: string): T {
@@ -65,9 +75,16 @@ beforeEach(() => {
   jest.clearAllMocks();
   backHandlers = [];
   mounted = [];
+  appStateHandlers = [];
+  // clearAllMocks keeps an implementation, and some tests make every save fail.
+  jest.mocked(saveSettings).mockResolvedValue(undefined);
   jest.spyOn(Alert, 'alert').mockImplementation(() => {});
   jest.spyOn(BackHandler, 'addEventListener').mockImplementation((event, handler) => {
     backHandlers.push({ event, handler });
+    return { remove: () => {} };
+  });
+  jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, handler) => {
+    appStateHandlers.push(handler);
     return { remove: () => {} };
   });
 });
@@ -86,14 +103,15 @@ async function mountEditor({
   pixelRatio = 3,
   image = PHOTO,
   pro = true,
-}: { platform?: typeof Platform.OS; pixelRatio?: number; image?: ProjectImage; pro?: boolean } = {}) {
+  ephemeral,
+}: { platform?: typeof Platform.OS; pixelRatio?: number; image?: ProjectImage; pro?: boolean; ephemeral?: true } = {}) {
   Platform.OS = platform;
   jest.spyOn(PixelRatio, 'get').mockReturnValue(pixelRatio);
   const onClose = jest.fn();
   let rendered: ReactTestRenderer | undefined;
   await act(async () => {
     rendered = renderer.create(
-      <EditorScreen project={{ id: 'p1', updatedAt: 0, image, settings: {} }} onClose={onClose} pro={pro} />,
+      <EditorScreen project={{ id: 'p1', updatedAt: 0, image, settings: {}, ephemeral }} onClose={onClose} pro={pro} />,
       { createNodeMock: () => ({}) } // give the off-screen views a ref to capture
     );
   });
@@ -414,6 +432,106 @@ describe('the debounced autosave', () => {
     await act(async () => tree.unmount());
     mounted.length = 0;
     expect(saveSettings).toHaveBeenCalledTimes(1); // no second, duplicate write
+  });
+});
+
+describe('leaving the editor', () => {
+  /** The header's '‹ Portraits', pressed and let finish. */
+  const back = (tree: ReactTestRenderer) =>
+    act(async () => {
+      await found(
+        tree.root.findAll((n) => n.props && n.props.accessibilityLabel === 'Back to portraits')[0],
+        "the header's way back"
+      ).props.onPress();
+    });
+  const lastAlert = () => found(jest.mocked(Alert.alert).mock.calls.at(-1), 'an alert');
+
+  it('writes the latest edit before it goes, not after', async () => {
+    const { tree, onClose } = await mountEditor();
+    await press(tree, 'Center'); // inside the 600 ms wait
+    await back(tree);
+
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(saveSettings).mock.calls[0]?.[1].showCenter).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    // Written, then gone: a failure has to be able to keep the drawing open.
+    const [saved = 0] = jest.mocked(saveSettings).mock.invocationCallOrder;
+    const [closed = 0] = onClose.mock.invocationCallOrder;
+    expect(saved).toBeLessThan(closed);
+  });
+
+  it('stays, and asks, when that write fails; leaving is the user\'s call', async () => {
+    jest.mocked(saveSettings).mockRejectedValue(new Error('disk full'));
+    const { tree, onClose } = await mountEditor();
+    await press(tree, 'Center');
+    await back(tree);
+
+    expect(onClose).not.toHaveBeenCalled();
+    const [title, , buttons = []] = lastAlert();
+    expect(title).toBe('Drawing not saved');
+    expect(buttons.map((b) => b.text)).toEqual(['Stay', 'Leave without saving']);
+
+    await act(async () => buttons[0]?.onPress?.()); // Stay: the Cancel-styled one does nothing
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => buttons[1]?.onPress?.());
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks the same way on Android\'s Back', async () => {
+    jest.mocked(saveSettings).mockRejectedValue(new Error('disk full'));
+    const { tree, onClose } = await mountEditor({ platform: 'android' });
+    await press(tree, 'Center');
+    await act(async () => {
+      found(backHandlers.at(-1), 'a back handler').handler(BACK_PRESS);
+    });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(lastAlert()[0]).toBe('Drawing not saved');
+  });
+
+  it('writes again on the way out what an earlier save failed to keep', async () => {
+    jest.mocked(saveSettings).mockRejectedValueOnce(new Error('disk full'));
+    const { tree, onClose } = await mountEditor();
+    await press(tree, 'Center');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700)); // the debounced save runs, and fails
+    });
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(lastAlert()[0]).toBe('Drawing not saved'); // said, in the background
+
+    await back(tree);
+    expect(saveSettings).toHaveBeenCalledTimes(2);
+    expect(jest.mocked(saveSettings).mock.calls[1]?.[1].showCenter).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes what is unsaved when the app goes to the background, and reports a failure once', async () => {
+    jest.mocked(saveSettings).mockRejectedValue(new Error('disk full'));
+    const { tree } = await mountEditor();
+    await press(tree, 'Center');
+    const toBackground = () =>
+      act(async () => {
+        for (const handler of appStateHandlers) handler('background');
+      });
+
+    await toBackground();
+    expect(saveSettings).toHaveBeenCalledTimes(1);
+    expect(jest.mocked(saveSettings).mock.calls[0]?.[1].showCenter).toBe(true);
+    await toBackground();
+    expect(saveSettings).toHaveBeenCalledTimes(2); // still unsaved, so tried again
+    const said = jest.mocked(Alert.alert).mock.calls.filter(([title]) => title === 'Drawing not saved');
+    expect(said).toHaveLength(1); // not once per attempt
+  });
+
+  it('has nothing to write for a portrait that could not be kept, and goes at once', async () => {
+    // It was opened on the picker's own file and left out of the index, so
+    // there is no record to save into; a write would only fail.
+    const { tree, onClose } = await mountEditor({ ephemeral: true });
+    await press(tree, 'Center');
+    await back(tree);
+
+    expect(saveSettings).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(Alert.alert).not.toHaveBeenCalled();
   });
 });
 

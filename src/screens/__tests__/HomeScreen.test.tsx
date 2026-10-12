@@ -125,6 +125,72 @@ describe('choosing a portrait', () => {
     expect(ImagePicker.launchCameraAsync).not.toHaveBeenCalled();
     expect(Alert.alert).toHaveBeenCalled();
   });
+
+  it('opens the camera for stills only', async () => {
+    const { pressByLabel } = await mount();
+    await pressByLabel('Take a photo');
+    // The app never records, and its config asks for no microphone.
+    expect(ImagePicker.launchCameraAsync).toHaveBeenCalledWith({ mediaTypes: ['images'], quality: 1 });
+  });
+});
+
+describe('when storage lets the user down', () => {
+  /** Every alert's title, in order. */
+  const titles = () => jest.mocked(Alert.alert).mock.calls.map(([title]) => title);
+  const ASSET = { uri: 'file:///cache/IMG_3.jpg', width: 100, height: 200 };
+
+  it('says the saved drawings could not be read, rather than showing none', async () => {
+    jest.mocked(listProjects).mockRejectedValueOnce(new SyntaxError('Unexpected token'));
+    await mount();
+    expect(titles()).toEqual(['Could not load drawings']);
+  });
+
+  it.each([
+    ['Choose a portrait', 'Could not open portrait'],
+    ['Take a photo', 'Could not take photo'],
+  ])('says why %s opened nothing, and the buttons work again', async (label, title) => {
+    const picker = label === 'Take a photo' ? ImagePicker.launchCameraAsync : ImagePicker.launchImageLibraryAsync;
+    jest.mocked(picker).mockResolvedValueOnce({ canceled: false, assets: [ASSET] });
+    jest.mocked(createProject).mockRejectedValueOnce(new Error('disk full'));
+    const { tree, onOpenProject, pressByLabel } = await mount();
+    await pressByLabel(label);
+
+    expect(onOpenProject).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenLastCalledWith(title, 'disk full');
+    const buttons = tree.root.findAll((n) => n.props && n.props.accessibilityRole === 'button' && 'disabled' in n.props);
+    expect(buttons.length).toBeGreaterThan(0);
+    expect(buttons.every((b) => !b.props.disabled)).toBe(true);
+  });
+
+  it('says why the camera could not be used', async () => {
+    jest.mocked(ImagePicker.launchCameraAsync).mockRejectedValueOnce(new Error('camera in use'));
+    const { pressByLabel } = await mount();
+    await pressByLabel('Take a photo');
+    expect(Alert.alert).toHaveBeenLastCalledWith('Could not take photo', 'camera in use');
+  });
+
+  it('says a drawing could not be removed, and shows the list as it is stored', async () => {
+    Platform.OS = 'ios';
+    const recent: Project = {
+      id: 'p9',
+      updatedAt: 1,
+      image: { uri: 'file:///docs/portraits/p9.jpg', width: 10, height: 20 },
+      settings: null,
+    };
+    jest.mocked(listProjects).mockResolvedValue([recent]);
+    jest.mocked(deleteProject).mockRejectedValueOnce(new Error('file locked'));
+    const { tree } = await mount();
+    const thumb = found(
+      tree.root.findAll((n) => n.props && typeof n.props.onLongPress === 'function')[0],
+      'the recent thumbnail'
+    );
+    await act(async () => thumb.props.onLongPress());
+    const [, , buttons = []] = found(jest.mocked(Alert.alert).mock.calls[0], 'the confirmation');
+    await act(async () => buttons[1]?.onPress?.());
+
+    expect(Alert.alert).toHaveBeenLastCalledWith('Could not remove drawing', 'file locked');
+    expect(listProjects).toHaveBeenCalledTimes(2); // read again, so the list shows what is stored
+  });
 });
 
 describe('removing a recent portrait', () => {

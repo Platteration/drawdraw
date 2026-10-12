@@ -125,10 +125,10 @@ describe('sanitizeProject', () => {
   });
 
   it('refuses a file URI that climbs out of the directory it names', () => {
-    // removePortrait's guard is a prefix test (storage.ts), and every one of
-    // these passes a prefix test while naming a file outside the portraits
-    // directory — deleteAsync resolves the `..` and deletes what it finds,
-    // which the MAX_PROJECTS truncation fires on its own. An authority is the
+    // Every one of these passes a prefix test while naming a file outside the
+    // portraits directory — deleteAsync resolves the `..` and deletes what it
+    // finds, and storage.ts's deletion guard was a prefix test until it held
+    // to the one file createProject names. An authority is the
     // same kind of lie: file://host/x names a host, not a local file.
     const dir = 'file:///docs/portraits/';
     for (const uri of [
@@ -316,8 +316,8 @@ describe('sanitizeSettings', () => {
     // PROPORTION_KEYS comes from DEFAULT_PROPORTIONS and the bound from
     // PROPORTION_RANGES, so adding a proportion without a range — the natural
     // order, since the defaults are what the model reads — used to throw a
-    // TypeError here. listProjects catches everything and returns [], so the
-    // library empties and the next write makes that permanent.
+    // TypeError here, out of every read of the index: the library unreadable,
+    // and (before storage.ts reported that) emptied by the next write.
     expect(Object.keys(DEFAULT_PROPORTIONS).sort()).toEqual(Object.keys(PROPORTION_RANGES).sort());
 
     jest.isolateModules(() => {

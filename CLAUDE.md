@@ -63,7 +63,7 @@ also is. Run both (and `npm run check`) before pushing.
   options `react-native-view-shot` actually reads. iOS takes them as points
   and rasterises at the screen scale, so a pixel count there is multiplied by
   the device scale. Pure, tested.
-- `src/lib/storage.ts` and `src/screens/EditorScreen.tsx` import
+- `src/lib/storage.ts` and `src/lib/exports.ts` import
   `expo-file-system/legacy` and `expo-media-library/legacy`: since SDK 54 and 56
   the package roots are object APIs whose functions of the old names are stubs
   that throw. The unit suites mock native modules wholesale, so
@@ -79,7 +79,17 @@ also is. Run both (and `npm run check`) before pushing.
 - `src/components/HeadGuide.tsx` — renders the model with `react-native-svg`.
   Used both on screen and inside the off-screen export views, which is what
   keeps exports identical to what you see.
-- `src/screens/EditorScreen.tsx` — the editor; holds the guide state.
+- `src/lib/storage.ts` — the project index and the portrait copies it owns.
+  Every read-modify-write of the index runs one at a time (`mutate`); an index
+  that will not read is reported and never written over (an import then opens
+  unsaved, `ephemeral`, like one whose copy failed); nothing removes a drawing
+  but the user, and a removal deletes only the file `createProject` named for
+  that project.
+- `src/lib/exports.ts` — `offerExport`, the device's Save to Photos / Share
+  dialog for a captured PNG, which releases the temporary file once, after the
+  choice has finished with it.
+- `src/screens/EditorScreen.tsx` — the editor; holds the guide state, and
+  writes it before it leaves (a write that fails keeps it open and asks).
 - `src/lib/errors.ts` — reads `message` and `code` off a caught value of
   unknown type, the way the screens' alerts always read them.
 - `plugins/withDebugInternet.js` — config plugin. `app.json` blocks every Android

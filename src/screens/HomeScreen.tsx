@@ -15,8 +15,9 @@ import Svg, { Path } from 'react-native-svg';
 import { colors, radius } from '../theme';
 import { confirmAction, notify } from '../lib/confirm';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS, type Polyline } from '../lib/headModel';
+import { errorText } from '../lib/errors';
 import type { Project } from '../lib/projectShape';
-import { createProject, deleteProject, listProjects } from '../lib/storage';
+import { createProject, deleteProject, listProjects, type CreatedProject } from '../lib/storage';
 
 /** Small static ¾-view head, drawn with the real model, as the app's mark. */
 function HeadMark({ size = 118 }: { size?: number }) {
@@ -51,7 +52,7 @@ function HeadMark({ size = 118 }: { size?: number }) {
 }
 
 export interface HomeScreenProps {
-  onOpenProject: (project: Project) => void;
+  onOpenProject: (project: CreatedProject) => void;
   pro?: boolean;
   onRequestPro?: () => void;
   onReplayIntro?: () => void;
@@ -72,8 +73,17 @@ export default function HomeScreen({
   // page: the home screen says so once, rather than an alert on every import.
   const keepsPortraits = Platform.OS !== 'web';
 
+  // An index that will not read is said to be unreadable, not shown as an
+  // empty library, and nothing here writes over it (src/lib/storage.ts).
   const refresh = useCallback(() => {
-    listProjects().then(setRecents);
+    listProjects()
+      .then(setRecents)
+      .catch(() =>
+        notify(
+          'Could not load drawings',
+          'DrawDraw could not read its saved drawings. They have been left as they are, not replaced, and a portrait you open now will not be saved. Try reopening the app.'
+        )
+      );
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -87,12 +97,13 @@ export default function HomeScreen({
     }
     const project = await createProject(asset);
     if (project.ephemeral && keepsPortraits) {
-      // The durable copy failed, so this portrait only lasts as long as the
-      // system keeps the picker's own file. Better to say so than to leave a
-      // Recent thumbnail that goes blank later with no way to repair it.
+      // The portrait could not be kept (the durable copy failed, or the saved
+      // index would not read), so it only lasts as long as the system keeps
+      // the picker's own file. Better to say so than to leave a Recent
+      // thumbnail that goes blank later with no way to repair it.
       notify(
         'Opened, but not saved',
-        'This portrait could not be copied into DrawDraw, so it will not appear under Recent. Your guide setup will not be kept either.'
+        'This portrait could not be saved in DrawDraw, so it will not appear under Recent and your guide setup will not be kept. You can still fit the guide and export it now.'
       );
     }
     onOpenProject(project);
@@ -120,6 +131,8 @@ export default function HomeScreen({
           preferredAssetRepresentationMode: ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Automatic,
         })
       );
+    } catch (error) {
+      notify('Could not open portrait', errorText(error));
     } finally {
       setBusy(false);
     }
@@ -134,7 +147,10 @@ export default function HomeScreen({
         notify('Permission needed', 'Allow camera access to take a portrait.');
         return;
       }
-      await openAsset(await ImagePicker.launchCameraAsync({ quality: 1 }));
+      // Stills only, as from the library: the app never records.
+      await openAsset(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 }));
+    } catch (error) {
+      notify('Could not take photo', errorText(error));
     } finally {
       setBusy(false);
     }
@@ -150,7 +166,11 @@ export default function HomeScreen({
       cancelLabel: 'Cancel',
       confirmLabel: 'Remove',
       onConfirm: async () => {
-        await deleteProject(project.id);
+        try {
+          await deleteProject(project.id);
+        } catch (error) {
+          notify('Could not remove drawing', errorText(error));
+        }
         refresh();
       },
     });

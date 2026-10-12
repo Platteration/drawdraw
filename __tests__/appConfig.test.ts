@@ -7,6 +7,16 @@
  * The same goes for every other key a plugin defaults: app.json states them,
  * even at the default, so the file and this test say the same thing and a
  * default that moves between SDKs moves visibly.
+ *
+ * The config plugins run in Node, at prebuild, and resolve their packages the
+ * way Node does: React Native's test environment offers only `require` and
+ * `react-native` as export conditions, which sends xcode's `uuid` (11.1.1,
+ * the patched release package.json's overrides pin, whose export map names
+ * `node`, `browser` and `default`) to its ES-module browser build, and the
+ * suite fails to load. So this file runs in Node, with `node` added to the two.
+ *
+ * @jest-environment node
+ * @jest-environment-options {"customExportConditions": ["node", "require", "react-native"]}
  */
 import { execFileSync } from 'child_process';
 import fs from 'fs';
@@ -213,6 +223,14 @@ describe('permissions requested by the config plugins', () => {
     // The reason the microphone is not needed, checked against the source
     // rather than assumed.
     expect(appSource()).not.toMatch(/recordAsync|MediaTypeOptions\.Videos|'videos'/i);
+  });
+
+  it('asks the media-library plugin for photos alone', () => {
+    // Its default granular set is photos, video and audio, each a READ_MEDIA_*
+    // permission it adds to the manifest. The app saves images and reads
+    // nothing (blockedPermissions takes the reads back out regardless), so
+    // the plugin is not asked for video or audio at all.
+    expect(pluginOptions('expo-media-library').granularPermissions).toEqual(['photo']);
   });
 
   it('keeps the add-only photo library string the save flow relies on', () => {

@@ -321,7 +321,18 @@ async function walkThrough() {
   check('buying says it is not available, through the browser dialog', dialogs.length === 1 && dialogs[0].startsWith('Not available yet'), dialogs.join(' | ') || 'no dialog');
 
   await tap('Close');
-  await tap('‹ Portraits');
+  // Leaving the instant after an edit, before the 600 ms autosave has fired.
+  // On a device the editor writes the edit before it goes, and a write that
+  // fails keeps it open and asks (the unit suite holds both); a browser keeps
+  // no portrait, so there is no record to write and it leaves at once, with
+  // no dialog about it.
+  await tap('Guide', { exact: true });
+  dialogs.length = 0;
+  await page.getByText('Profile', { exact: true }).filter({ visible: true }).first().click({ timeout: 10000 });
+  await page.getByText('‹ Portraits', { exact: true }).filter({ visible: true }).first().click({ timeout: 10000 });
+  const left = await page.getByText('Choose a portrait', { exact: true }).waitFor({ timeout: 5000 }).then(() => true, () => false);
+  check('leaving straight after an edit goes home at once, with no dialog', left && dialogs.length === 0, dialogs.join(' | ') || (left ? '' : 'still in the editor'));
+  await page.waitForTimeout(400);
   await tap('Settings', { exact: true }); // the home screen's web note mentions settings too
   const settings = await page.locator('body').innerText();
   check('settings shows its rows', settings.includes('Vibration') && settings.includes('Reset to defaults'));

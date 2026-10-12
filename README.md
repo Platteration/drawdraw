@@ -46,9 +46,11 @@ browser, downloaded:
    photo does not contain.
 
 **Pick up where you left off.** Portraits are kept as projects with their full guide setup
-autosaved. Picked images are copied out of the OS cache into the app's documents directory,
-so recents cannot break when the system clears its cache. A browser has no such directory: the
-website keeps your settings, not your portraits, and says so on its home screen.
+autosaved, and written again as you leave the editor or the app goes to the background; a save
+that fails is said, and leaving then is your call. Picked images are copied out of the OS cache
+into the app's documents directory, so recents cannot break when the system clears its cache,
+and every drawing stays until you remove it (a long press on a recent). A browser has no such
+directory: the website keeps your settings, not your portraits, and says so on its home screen.
 
 ## How the fit works
 

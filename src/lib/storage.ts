@@ -8,14 +8,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { portraitExtension } from './filenames';
-import { hasTraversal, sanitizeProjects, type Project, type ProjectSettings } from './projectShape';
+import { sanitizeProjects, type Project, type ProjectSettings } from './projectShape';
 import { KEYS } from './settings';
 
 const INDEX_KEY = KEYS.projects;
-const PORTRAIT_DIR = `${FileSystem.documentDirectory}portraits/`;
-const MAX_PROJECTS = 30;
+// A browser has no documentDirectory (expo-file-system answers null there), so
+// nothing it opens can be made durable: every portrait there is ephemeral.
+const PORTRAIT_DIR = FileSystem.documentDirectory ? `${FileSystem.documentDirectory}portraits/` : null;
 
-/** A new project; `ephemeral` when its image could not be copied and it was kept out of the index. */
+/** A new project; `ephemeral` when it could not be kept and was left out of the index. */
 export type CreatedProject = Project & { ephemeral?: true };
 
 /**
@@ -27,45 +28,76 @@ export type CreatedProject = Project & { ephemeral?: true };
  * the project references that durable copy.
  *
  * Every copy this module makes is owned by the index: a portrait leaves disk
- * when its record leaves the index, whether that is an explicit delete or the
- * oldest entry falling off the end of the list. Otherwise a heavy user
- * accumulates full-resolution copies of people's faces that nothing in the
- * app can reach and nothing but reinstalling can clear.
+ * when its record leaves the index, and a record leaves the index only when
+ * the user removes it. There is no ceiling on the list. A thirty-item cap used
+ * to drop the oldest drawing on the thirty-first import, its portrait with it,
+ * without anyone asking; the library is the user's own work, so it grows until
+ * they remove something. Otherwise a heavy user accumulates either
+ * full-resolution copies of people's faces that nothing in the app can reach,
+ * or a library that loses drawings behind their back.
+ *
+ * Every read-modify-write of the index goes through `mutate`, one at a time:
+ * two imports, or an autosave racing an import, each read the same list and
+ * the second write silently dropped what the first had added.
  */
 
-async function ensureDir(): Promise<void> {
-  const info = await FileSystem.getInfoAsync(PORTRAIT_DIR);
+let mutations: Promise<unknown> = Promise.resolve();
+let sequence = 0;
+
+/** Run `operation` once every mutation queued before it has finished, whether or not it failed. */
+function mutate<T>(operation: () => Promise<T>): Promise<T> {
+  const result = mutations.then(operation);
+  mutations = result.catch(() => {});
+  return result;
+}
+
+async function ensureDir(dir: string): Promise<void> {
+  const info = await FileSystem.getInfoAsync(dir);
   if (!info.exists) {
-    await FileSystem.makeDirectoryAsync(PORTRAIT_DIR, { intermediates: true });
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
   }
 }
 
 /**
- * Delete a portrait copy this module made. Ignores anything it did not.
- *
- * The prefix is necessary and not sufficient: `${PORTRAIT_DIR}../../databases/
- * RKStorage` starts with PORTRAIT_DIR and names a file two directories above
- * it, which deleteAsync will happily resolve and remove — the app's own
- * AsyncStorage database among the reachable targets. Nothing this module
- * writes contains a `..`, so the containment is the prefix *and* the absence
- * of one. sanitizeProject refuses such a URI on the way in as well; the two
- * are deliberately redundant, because this is the call that deletes.
+ * The file createProject copied for `project`, or null when the record names
+ * anything else. Only that exact name is the project's to delete: an id of the
+ * form createProject makes (`p`, then base-36 digits and a dash, nothing that
+ * can spell a path) and the file named for it in PORTRAIT_DIR. A prefix test
+ * is satisfied by `${PORTRAIT_DIR}../../databases/RKStorage`, which deleteAsync
+ * resolves to the app's own AsyncStorage database, and by another project's
+ * portrait (`p2.png` named in p1's record), which deleting p1 must not take
+ * with it. sanitizeProject refuses a traversing URI on the way in as well; the
+ * two are deliberately redundant, because this is the call that deletes.
  */
-async function removePortrait(uri: unknown): Promise<void> {
-  if (typeof uri !== 'string' || !uri.startsWith(PORTRAIT_DIR)) return;
-  if (hasTraversal(uri)) return;
-  await FileSystem.deleteAsync(uri, { idempotent: true }).catch(() => {});
+function ownedPortrait(project: Project): string | null {
+  if (!PORTRAIT_DIR || !/^p[0-9a-z]+(?:-[0-9a-z]+)?$/.test(project.id)) return null;
+  const uri = project.image.uri;
+  return uri === `${PORTRAIT_DIR}${project.id}.${portraitExtension(uri)}` ? uri : null;
 }
 
+/**
+ * The stored index. A missing one is an empty library; one that will not parse,
+ * or is not a list, throws, because a failed read taken for an empty library
+ * is what the next write then makes permanent. Within a readable list, a
+ * record the app could not open is left out (see projectShape.ts).
+ */
+async function readIndex(): Promise<Project[]> {
+  const raw = await AsyncStorage.getItem(INDEX_KEY);
+  const parsed: unknown = raw ? JSON.parse(raw) : [];
+  if (!Array.isArray(parsed)) throw new Error('The saved drawing index could not be read.');
+  return sanitizeProjects(parsed);
+}
+
+/**
+ * Every saved drawing, newest first. Throws when the index cannot be read,
+ * rather than answering empty. A browser keeps none (createProject indexes
+ * nothing there), so its answer is empty without reading a key that, on a
+ * shared origin, another app may have written.
+ */
 export async function listProjects(): Promise<Project[]> {
-  try {
-    const raw = await AsyncStorage.getItem(INDEX_KEY);
-    // Written by this app, but not necessarily by this build of it, and not
-    // necessarily completely. See projectShape.ts.
-    return sanitizeProjects(raw ? JSON.parse(raw) : []);
-  } catch {
-    return [];
-  }
+  if (!PORTRAIT_DIR) return [];
+  await mutations;
+  return readIndex();
 }
 
 async function writeIndex(projects: Project[]): Promise<void> {
@@ -75,59 +107,99 @@ async function writeIndex(projects: Project[]): Promise<void> {
 /**
  * Copy a freshly picked image somewhere durable and create its project.
  *
- * When the copy fails the project is still returned so the editor opens on
- * the picker's own URI, but it is flagged `ephemeral` and kept out of the
- * index: writing it there would leave a permanent Recent entry pointing into
- * a cache the OS is free to clear, with no way to repair it from inside the
- * app. The caller is expected to say so.
+ * When the portrait cannot be kept — no file system (a browser), a copy that
+ * fails, or an index that cannot be read — the project is still returned so
+ * the editor opens on the picker's own URI, but it is flagged `ephemeral` and
+ * kept out of the index: writing a record that points into a cache the OS is
+ * free to clear leaves a Recent entry that goes blank, and writing over an
+ * index that would not read replaces the user's whole library. The caller is
+ * expected to say so. An index that reads but will not take the new record is
+ * an error, and the copy made for it is removed again.
  */
-export async function createProject(asset: {
-  uri: string;
-  width: number;
-  height: number;
-}): Promise<CreatedProject> {
-  const id = `p${Date.now().toString(36)}`;
-  let uri = asset.uri;
-  let durable = false;
-  try {
-    await ensureDir();
-    const dest = `${PORTRAIT_DIR}${id}.${portraitExtension(asset.uri)}`;
-    await FileSystem.copyAsync({ from: asset.uri, to: dest });
-    uri = dest;
-    durable = true;
-  } catch {
-    // Fall back to the original URI; the project still works this session.
+export async function createProject(asset: { uri: string; width: number; height: number }): Promise<CreatedProject> {
+  if (
+    typeof asset.uri !== 'string' ||
+    !asset.uri ||
+    !Number.isFinite(asset.width) ||
+    asset.width <= 0 ||
+    !Number.isFinite(asset.height) ||
+    asset.height <= 0
+  ) {
+    throw new Error('Could not read that portrait or its dimensions.');
   }
+  const image = { uri: asset.uri, width: asset.width, height: asset.height };
+  return mutate(async () => {
+    const opened = (id: string): CreatedProject => ({ id, updatedAt: Date.now(), image, settings: null, ephemeral: true });
+    if (!PORTRAIT_DIR) return opened(`p${Date.now().toString(36)}-${(++sequence).toString(36)}`);
 
-  const project: Project = {
-    id,
-    updatedAt: Date.now(),
-    image: { uri, width: asset.width, height: asset.height },
-    settings: null,
-  };
+    let projects: Project[];
+    try {
+      projects = await readIndex();
+    } catch {
+      return opened(`p${Date.now().toString(36)}-${(++sequence).toString(36)}`);
+    }
 
-  if (!durable) return { ...project, ephemeral: true };
+    // Two imports in the same millisecond must not share an id, or a file.
+    let id: string;
+    do {
+      id = `p${Date.now().toString(36)}-${(++sequence).toString(36)}`;
+    } while (projects.some((p) => p.id === id));
 
-  const projects = await listProjects();
-  const all = [project, ...projects];
-  // Truncation drops the record; the copy on disk has to go with it.
-  await writeIndex(all.slice(0, MAX_PROJECTS));
-  for (const dropped of all.slice(MAX_PROJECTS)) await removePortrait(dropped.image?.uri);
-  return project;
+    const dest = `${PORTRAIT_DIR}${id}.${portraitExtension(asset.uri)}`;
+    try {
+      await ensureDir(PORTRAIT_DIR);
+      await FileSystem.copyAsync({ from: asset.uri, to: dest });
+    } catch {
+      return opened(id);
+    }
+
+    const project: Project = { id, updatedAt: Date.now(), image: { ...image, uri: dest }, settings: null };
+    try {
+      await writeIndex([project, ...projects]);
+    } catch (error) {
+      try {
+        await FileSystem.deleteAsync(dest, { idempotent: true });
+      } catch {
+        throw new Error(
+          'The drawing could not be saved and its copied portrait could not be removed. Free some storage and try again.'
+        );
+      }
+      throw error;
+    }
+    return project;
+  });
 }
 
+/** Save one drawing's guide setup. Throws when the index cannot be read or written, or no longer holds the drawing. */
 export async function saveSettings(id: string, settings: ProjectSettings): Promise<void> {
-  const projects = await listProjects();
-  const next = projects.map((p) =>
-    p.id === id ? { ...p, settings, updatedAt: Date.now() } : p
-  );
-  next.sort((a, b) => b.updatedAt - a.updatedAt);
-  await writeIndex(next);
+  return mutate(async () => {
+    const projects = await readIndex();
+    if (!projects.some((p) => p.id === id)) throw new Error('This drawing is no longer in saved storage.');
+    const next = projects.map((p) => (p.id === id ? { ...p, settings, updatedAt: Date.now() } : p));
+    next.sort((a, b) => b.updatedAt - a.updatedAt);
+    await writeIndex(next);
+  });
 }
 
+/**
+ * Remove a drawing and the portrait copy it owns. The removal is written
+ * first, so an index that will not take it leaves the photo where it was; a
+ * photo that will not delete puts the record back, so the drawing can be
+ * removed again rather than leaving a portrait nothing can reach.
+ */
 export async function deleteProject(id: string): Promise<void> {
-  const projects = await listProjects();
-  const target = projects.find((p) => p.id === id);
-  await writeIndex(projects.filter((p) => p.id !== id));
-  await removePortrait(target?.image?.uri);
+  return mutate(async () => {
+    const projects = await readIndex();
+    const target = projects.find((p) => p.id === id);
+    await writeIndex(projects.filter((p) => p.id !== id));
+    const file = target ? ownedPortrait(target) : null;
+    if (!file) return;
+    try {
+      // idempotent: a file that has already gone is not an error.
+      await FileSystem.deleteAsync(file, { idempotent: true });
+    } catch (error) {
+      await writeIndex(projects);
+      throw error;
+    }
+  });
 }
