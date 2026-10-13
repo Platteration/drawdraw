@@ -159,12 +159,13 @@ the content-hashed bundle under `_expo/static/`, plus the config file for your h
 | Host | Reads | Notes |
 | --- | --- | --- |
 | Netlify, Cloudflare Pages | `_headers`, `_redirects` | Build with `--host netlify` or `--host cloudflare`, which leaves `.htaccess` out (Netlify would refuse it through `_redirects` anyway; Cloudflare Pages has no 404 rule and would serve it as a file). |
-| Apache 2.4 | `.htaccess` | Build with `--host apache`. Needs `mod_rewrite`, `mod_headers` and `AllowOverride FileInfo Options`. |
-| nginx | `deploy/nginx.conf` | Build with `--host nginx`; copy the config into the server's, set `server_name`, `root` and the certificate paths. Written for a domain root. |
+| Apache 2.4 | `.htaccess` | Build with `--host apache`. Needs `mod_rewrite` and `mod_headers` (`a2enmod rewrite headers`) and `AllowOverride FileInfo Options`; without either module every request is a 500 and the error log names the directive. Set `ServerTokens Prod` in the server config, which no `.htaccess` can: without it every response names Apache's version and the system's. |
+| nginx | `deploy/nginx.conf` | Build with `--host nginx`; copy the config into the server's, set `server_name`, `root` and the certificate paths. Written for a domain root. HTTP/2 is turned on in the `listen` lines, which nginx 1.24 (Ubuntu 24.04's) reads; `http2 on;` would need 1.25.1. |
 | GitHub Pages | nothing | Build with `--host github-pages --base-url /<repo>`, which writes `.nojekyll`: a branch deploy otherwise runs Jekyll, which drops every path starting with `_`, the bundle's `_expo/` among them. Pages sends no headers of the site's choosing: only the `<meta>` policy applies (not `frame-ancestors`, which a `<meta>` cannot carry), and HSTS, nosniff, the framing refusal, the Permissions-Policy and COOP/CORP do not. |
 
 The headers, the same in `public/_headers`, `public/.htaccess` and `deploy/nginx.conf`
-(`__tests__/website.test.ts` fails when they are not):
+(`__tests__/website.test.ts` fails when they are not, and `npm run test:e2e` checks what a real
+nginx and Apache send with them):
 
 | Header | Value | Why |
 | --- | --- | --- |
@@ -236,9 +237,15 @@ paywall and Settings — then checks where the guide actually landed against a
 synthetic portrait laid out on known thirds. Any policy violation, console or
 page error, or request outside the site fails the run, which is how a runtime
 break, or a policy that blocks something real, gets caught while bundling still
-succeeds. It also checks the 404 page, the safety net with the bundle blocked,
-the page with JavaScript off, and the files a host must not serve. The web is a
-shipping target as well as the device stand-in for CI.
+succeeds. It also checks the 404 page, the safety net with the bundle blocked
+and with a bundle that runs but never draws, the page with JavaScript off, and
+the files a host must not serve. Then `e2e/hosts.mjs` serves the same build from
+the nginx and Apache installed on the machine, `deploy/nginx.conf` and the
+`.htaccess` as the table above says to install them, and checks that every file
+of the site is answered with the headers `_headers` gives it, that everything
+else is the site's 404 page, and that plain HTTP is redirected; where nginx or
+Apache is missing it says so and skips, except under CI. The web is a shipping
+target as well as the device stand-in for CI.
 
 ## Project layout
 
@@ -286,6 +293,7 @@ public/                          Copied into the site: the page template, site.c
                                  (_headers, _redirects, .htaccess)
 deploy/nginx.conf                The same headers and rules for nginx
 e2e/smoke.mjs, e2e/host.mjs      The website, served as _headers says, driven in Chromium
+e2e/hosts.mjs                    The same build on a real nginx and Apache
 ```
 
 App icons and the splash mark are generated from `src/lib/headModel.ts` rather

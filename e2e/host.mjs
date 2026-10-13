@@ -9,7 +9,7 @@
  */
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve, sep } from 'node:path';
+import { extname, join, normalize, relative, resolve, sep } from 'node:path';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -88,11 +88,13 @@ export async function startHost({ dir, base }) {
   const outside = [];
   const served = [];
 
+  // Refused by the file a path resolves to, not by how it was spelled: `//_headers` and
+  // `/x/../_headers` name the same file as `/_headers`, and were served before.
   const fileFor = (path) => {
-    if (path === '/_headers' || path === '/_redirects' || refused.has(path)) return null;
     const file = resolve(root, '.' + normalize(path.endsWith('/') ? `${path}index.html` : path));
-    const inside = file.startsWith(root + sep);
-    return inside && existsSync(file) && statSync(file).isFile() ? file : null;
+    if (!file.startsWith(root + sep) || !existsSync(file) || !statSync(file).isFile()) return null;
+    const name = `/${relative(root, file).split(sep).join('/')}`;
+    return name === '/_headers' || name === '/_redirects' || refused.has(name) ? null : file;
   };
 
   const server = createServer((req, res) => {

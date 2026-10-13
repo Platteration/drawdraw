@@ -17,8 +17,8 @@ npm run lint            # eslint, the shared Expo configuration
 npm run typecheck       # tsc --noEmit: strict, with noUncheckedIndexedAccess
 npm test                # jest, via the jest-expo preset
 npm run icons           # regenerate assets/ from the head model
-npm run build:web       # the website in .web-build/ (-- --base-url /drawdraw for a sub-path)
-npm run test:e2e        # build the website for /drawdraw/ and drive it in a browser under its policy
+npm run build:web       # the website in .web-build/ (-- --host github-pages --base-url /drawdraw for a sub-path)
+npm run test:e2e        # build the website for /drawdraw/, drive it in a browser under its policy, then serve it from real nginx and Apache
 npx expo export --platform ios --platform android --output-dir .export-check
 ```
 
@@ -110,7 +110,22 @@ also is. Run both (and `npm run check`) before pushing.
   with the headers exactly as `public/_headers` writes them. It fails on any
   policy violation, console or page error, or request outside the site, which
   is how a runtime break — or a policy that blocks something real — gets caught
-  when bundling still succeeds.
+  when bundling still succeeds. `e2e/host.mjs` refuses `_headers`, `_redirects`
+  and `_redirects`' 404 rules by the file a path resolves to, so `//_headers`
+  is refused like `/_headers`.
+- `e2e/hosts.mjs` — the last step of `npm run test:e2e`: the same build served
+  by the nginx and Apache installed on the machine (GitHub's Ubuntu runner has
+  nginx 1.24 and Apache 2.4.58), `deploy/nginx.conf` loaded with only the lines
+  its header says to change, `.htaccess` under `AllowOverride FileInfo Options`
+  and `ServerTokens Prod`, and checks what they send: every site file with the
+  headers `_headers` gives it (HSTS included behind a proxy that ends TLS),
+  everything else the 404 page with every header, plain HTTP redirected, no
+  version named, and an Apache without `mod_rewrite` and `mod_headers` serving
+  nothing. `website.test.ts` reads `.htaccess` line by line (an `<IfModule>`
+  or a condition after a header's value fails it) and nginx.conf directive by
+  directive (an `add_header` outside the HTTPS server, or `http2 on;`, fails
+  it), but only a server shows what a file does. Where nginx, Apache or openssl
+  is missing it says so and passes, except under `CI`.
 - The website. `scripts/build-web.mjs` runs `expo export --platform web`, which
   copies `public/` into the site and fills in `public/index.html` (SDK 57's
   single-output template: no inline script or style, `guard.js` first); then it

@@ -16,7 +16,7 @@
     "icons": "node tools/make-icons.mjs",
     "icons:check": "node tools/make-icons.mjs --check",
     "build:web": "node scripts/build-web.mjs",
-    "test:e2e": "npm run build:web -- --base-url /drawdraw && node e2e/smoke.mjs",
+    "test:e2e": "npm run build:web -- --base-url /drawdraw && node e2e/smoke.mjs && node e2e/hosts.mjs",
     "test:all": "npm test && npm run test:e2e",
     "e2e": "npm run test:e2e"
   },

@@ -12,7 +12,9 @@
  * console or page error, and any request outside the site fails the run, so a
  * policy that blocks something real is caught here. It then checks the
  * hosting layer itself: the 404 page, the safety net when the bundle cannot
- * load, the page without JavaScript, and the files a host must not serve.
+ * load or never draws, the page without JavaScript, and the files a host must
+ * not serve. e2e/hosts.mjs then serves the same build from a real nginx and
+ * Apache.
  *
  *   npm run test:e2e
  */
@@ -368,7 +370,9 @@ try {
   check('the 404 page raises no violation and asks for nothing outside the site', notFoundProblems.length === 0, notFoundProblems.slice(0, 3).join(' | '));
   await missing.context.close();
 
-  for (const path of ['_headers', '_redirects', '.htaccess', 'README.md', 'package.json', 'app.json', '.git/config', 'deploy/nginx.conf', 'src/screens/HomeScreen.tsx', '_expo/']) {
+  // Each config also by other spellings of the same file, which this host served while it
+  // refused the configs by name rather than by the file a path resolves to.
+  for (const path of ['_headers', '_redirects', '.htaccess', '/_headers', '/_redirects', '/.htaccess', '%2F.htaccess', 'README.md', 'package.json', 'app.json', '.git/config', 'deploy/nginx.conf', 'src/screens/HomeScreen.tsx', '_expo/']) {
     const status = (await fetch(`${site}${path}`)).status;
     check(`the host does not serve ${path}`, status === 404, String(status));
   }
@@ -394,6 +398,20 @@ try {
   await unstyled.page.waitForTimeout(800);
   check('a stylesheet that fails to load keeps the "has not started" note up', await unstyled.page.locator('#site-not-started').isVisible());
   await unstyled.context.close();
+
+  // A bundle that loads and runs but never draws (not every failure throws): guard.js's watchdog
+  // shows the note eight seconds after load. The page runs on Playwright's clock, so the test
+  // moves time on rather than waiting for it.
+  const silent = await sitePage();
+  await silent.page.clock.install();
+  await silent.page.route('**/_expo/static/**', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
+  await silent.page.goto(site, { waitUntil: 'load' });
+  await silent.page.clock.runFor(7000);
+  check('a bundle that runs but never draws shows no note seven seconds after load', !(await silent.page.locator('#site-not-started').isVisible()));
+  await silent.page.clock.runFor(1500);
+  check('and the "has not started" note once the watchdog\'s eight seconds are up', await silent.page.locator('#site-not-started').isVisible());
+  check('a silent bundle raises no violation and asks for nothing outside the site', silent.problems.length === 0, silent.problems.slice(0, 3).join(' | '));
+  await silent.context.close();
 
   // Pro's turnaround sheet, the one export with text in it. This build sells
   // nothing, so the test plants the stored entitlement the way a purchase would.
