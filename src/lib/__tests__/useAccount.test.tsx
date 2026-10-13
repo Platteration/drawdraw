@@ -2,7 +2,8 @@
  * The website's account, as App.tsx sees it. In the phone app it is off from
  * the first frame and asks nothing. On the web it asks the site's api/config
  * once; anything but a sign-in that is on leaves it off for good, and an API
- * that does not answer cannot hold the first frame for longer than its limit.
+ * that does not answer cannot hold the first frame for longer than its limit,
+ * though what it says after that is applied when it comes.
  */
 import React, { useEffect } from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
@@ -122,20 +123,41 @@ it('draws the site without an account when the API does not answer in time', asy
   expect(current()).toBe(ACCOUNT_OFF);
 });
 
-it('keeps to that once the limit has passed, whatever answers late', async () => {
+it('applies an api/config that answers after the limit: a paying visitor gets Pro then, not the free build for good', async () => {
+  // The first frame is drawn at the limit without an account; the answer that
+  // comes later switches the account on, takes Pro from api/me, and reads the
+  // address as it would have on time (Checkout's return included).
+  jest.useFakeTimers();
+  let answer: (config: ApiConfig | null) => void = () => {};
+  const client = fakeClient({
+    config: jest.fn(() => new Promise<ApiConfig | null>((resolve) => (answer = resolve))),
+    me: jest.fn(async () => ({ ...ADA, entitlements: ['pro'] })),
+    takeLanding: jest.fn((): Landing => ({ signIn: null, purchase: 'success' })),
+  });
+  await mount({ client, limitMs: 5000 });
+  await act(async () => jest.advanceTimersByTime(5000));
+  expect(current()).toBe(ACCOUNT_OFF);
+  expect(client.takeLanding).not.toHaveBeenCalled();
+  await act(async () => answer(SHOP));
+  expect(current()).toMatchObject({ settled: true, signInOn: true, shop: PRO, user: ADA.user, entitlements: ['pro'] });
+  expect(current().notice).toBe('Thank you — DrawDraw Pro is unlocked.');
+  expect(client.takeLanding).toHaveBeenCalledTimes(1);
+  expect(client.config).toHaveBeenCalledTimes(1);
+});
+
+it('stays off when the api/config that answers late says nothing is on', async () => {
   jest.useFakeTimers();
   let answer: (config: ApiConfig | null) => void = () => {};
   const client = fakeClient({ config: jest.fn(() => new Promise<ApiConfig | null>((resolve) => (answer = resolve))) });
   await mount({ client, limitMs: 5000 });
   await act(async () => jest.advanceTimersByTime(5000));
-  expect(current()).toBe(ACCOUNT_OFF);
-  await act(async () => answer(SHOP));
+  await act(async () => answer(null));
   expect(current()).toBe(ACCOUNT_OFF);
   expect(client.takeLanding).not.toHaveBeenCalled();
   expect(client.me).not.toHaveBeenCalled();
 });
 
-it('draws the site without an account when api/me does not answer in time either, and keeps to that', async () => {
+it('draws the site without an account when api/me does not answer in time either, and applies it when it does', async () => {
   jest.useFakeTimers();
   let answer: (me: Me | null) => void = () => {};
   const client = fakeClient({ me: jest.fn(() => new Promise<Me | null>((resolve) => (answer = resolve))) });
@@ -143,7 +165,20 @@ it('draws the site without an account when api/me does not answer in time either
   await act(async () => jest.advanceTimersByTime(5000));
   expect(current()).toBe(ACCOUNT_OFF);
   await act(async () => answer({ ...ADA, entitlements: ['pro'] }));
-  expect(current()).toBe(ACCOUNT_OFF);
+  expect(current()).toMatchObject({ settled: true, signInOn: true, shop: PRO, entitlements: ['pro'] });
+});
+
+it('applies nothing once it is unmounted', async () => {
+  jest.useFakeTimers();
+  let answer: (config: ApiConfig | null) => void = () => {};
+  const client = fakeClient({ config: jest.fn(() => new Promise<ApiConfig | null>((resolve) => (answer = resolve))) });
+  await mount({ client, limitMs: 5000 });
+  await act(async () => jest.advanceTimersByTime(5000));
+  const mounted = tree;
+  if (mounted) await act(async () => mounted.unmount());
+  tree = undefined;
+  await act(async () => answer(SHOP));
+  expect(client.takeLanding).not.toHaveBeenCalled();
 });
 
 it('is on with sign-in and Pro for sale, as the site says', async () => {
@@ -265,6 +300,81 @@ describe('actions', () => {
       note = await current().deleteAccount();
     });
     expect(note).toBe('The account could not be deleted. Try again.');
+  });
+
+  describe('the line at the top goes with the visitor it spoke to', () => {
+    const owner: Me = { ...ADA, entitlements: ['pro'] };
+    const thanked = async () => {
+      const clock = instant();
+      const client = fakeClient({ takeLanding: jest.fn((): Landing => ({ signIn: null, purchase: 'success' })), me: jest.fn(async () => owner) });
+      await mount({ client, wait: clock.wait });
+      expect(current().notice).toBe('Thank you — DrawDraw Pro is unlocked.');
+      jest.mocked(client.me).mockResolvedValue(SIGNED_OUT);
+      return client;
+    };
+
+    it('on sign-out: no thank-you beside a page that offers Pro again', async () => {
+      await thanked();
+      await act(async () => {
+        await current().signOut();
+      });
+      expect(current()).toMatchObject({ user: null, entitlements: [], notice: null });
+    });
+
+    it('on deleting the account', async () => {
+      await thanked();
+      await act(async () => {
+        await current().deleteAccount();
+      });
+      expect(current()).toMatchObject({ user: null, entitlements: [], notice: null });
+    });
+
+    it('when Buy finds the session has ended', async () => {
+      const client = await thanked();
+      await act(async () => {
+        await current().buyPro();
+      });
+      expect(current().notice).toBe('Thank you — DrawDraw Pro is unlocked.'); // leaving for Checkout changes nothing
+      jest.mocked(client.checkout).mockResolvedValueOnce('signin');
+      await act(async () => {
+        await current().buyPro();
+      });
+      expect(current()).toMatchObject({ user: null, notice: null });
+    });
+
+    it('but not when signing out did not work, or when Buy finds the purchase on record', async () => {
+      const client = await thanked();
+      jest.mocked(client.signOut).mockResolvedValueOnce(false);
+      jest.mocked(client.deleteAccount).mockResolvedValueOnce(false);
+      await act(async () => {
+        await current().signOut();
+        await current().deleteAccount();
+      });
+      expect(current().notice).toBe('Thank you — DrawDraw Pro is unlocked.');
+      jest.mocked(client.checkout).mockResolvedValueOnce('owned');
+      jest.mocked(client.me).mockResolvedValueOnce(owner);
+      await act(async () => {
+        await current().buyPro();
+      });
+      expect(current()).toMatchObject({ user: ADA.user, notice: 'Thank you — DrawDraw Pro is unlocked.' });
+    });
+
+    it('and a payment still being asked after is not reported to the page once they have signed out', async () => {
+      // Back from Checkout, api/me asked every three seconds; the visitor signs out
+      // before the webhook lands. The last answer must not put a line back.
+      let tick: () => void = () => {};
+      const wait = () => new Promise<void>((resolve) => (tick = resolve));
+      const client = fakeClient({ takeLanding: jest.fn((): Landing => ({ signIn: null, purchase: 'success' })) });
+      await mount({ client, wait });
+      expect(current().notice).toBeNull();
+      jest.mocked(client.me).mockResolvedValue(SIGNED_OUT);
+      await act(async () => {
+        await current().signOut();
+      });
+      for (let i = 0; i < 5; i += 1) await act(async () => tick());
+      expect(client.me).toHaveBeenCalledTimes(7); // the first answer, the five asked after Checkout, the sign-out's
+      expect(current()).toMatchObject({ user: null, notice: null });
+    });
   });
 
   it('buys Pro: leaves for Checkout, or reads the page afresh, or says why not', async () => {

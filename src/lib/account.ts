@@ -197,7 +197,9 @@ export async function pollFor(
  * How long the web build waits for `api/config` and `api/me` before it draws
  * the app as a site without an account. The first frame waits for them, so a
  * paying visitor is not shown the free build and then Pro; an API that does
- * not answer must not leave the page blank.
+ * not answer must not leave the page blank. An answer that comes after it is
+ * still applied (useAccount.ts): a slow API costs the visitor a few seconds of
+ * the free build, never Pro for the rest of the visit.
  */
 export const LOAD_LIMIT_MS = 5000;
 
@@ -237,7 +239,7 @@ export interface AccountState {
   /**
    * Whether the first frame may draw: at once in the phone app; on the web once
    * `api/config` (and, when it is on, `api/me`) has answered, failed, or taken
-   * longer than LOAD_LIMIT_MS.
+   * longer than LOAD_LIMIT_MS, in which case what they say later is applied then.
    */
   settled: boolean;
   /** Whether the site offers sign-in: Settings draws its Account rows only then. */
@@ -295,7 +297,7 @@ export const WORDS = {
 export const ACCOUNT_NOTES = {
   deleteTitle: 'Delete account?',
   deleteBody:
-    'This deletes your account on this site, and DrawDraw Pro with it: Pro stops being unlocked here. The payment itself stays with Stripe. Your portraits are not touched. This cannot be undone.',
+    'This deletes your account on this site, and DrawDraw Pro with it: Pro stops being unlocked here. The payment itself stays with Stripe, with the account id it was made under. Your portraits are not touched. This cannot be undone.',
   deleteConfirm: 'Delete account',
   deleteCancel: 'Keep my account',
   deleteFailed: 'The account could not be deleted. Try again.',
@@ -311,4 +313,4 @@ export const PRIVACY_NATIVE = 'Nothing leaves your device: the app has no networ
 export const PRIVACY_WEB = 'Nothing leaves your device: the page sends nothing of yours, and your portraits are never uploaded.';
 /** ...and on a website whose api/ offers sign-in. */
 export const PRIVACY_WEB_ACCOUNT =
-  "Nothing leaves your device unless you sign in or buy. Signing in with Google tells this site an account id and your email address; a purchase is paid through Stripe, which handles the payment. The site keeps the account id, what was bought and Stripe's customer id, and your email address only while you are signed in. Your portraits are never uploaded.";
+  "Nothing leaves your device unless you sign in or buy. Signing in with Google tells this site an account id and your email address; a purchase is paid through Stripe, which handles the payment and is told that account id with it. The site keeps the account id, what was bought and Stripe's customer id, and your email address only while you are signed in. Your portraits are never uploaded.";

@@ -5,6 +5,7 @@
  * out rather than drawn.
  */
 import {
+  ACCOUNT_NOTES,
   ACCOUNT_OFF,
   formatPrice,
   landingOf,
@@ -203,6 +204,10 @@ describe('the words', () => {
     for (const kept of ['an account id', 'your email address', 'Stripe', "Stripe's customer id", 'what was bought']) {
       expect(PRIVACY_WEB_ACCOUNT).toContain(kept);
     }
+    // A Checkout tells Stripe the visitor's account id (server/api.test.mjs reads it off the
+    // session the kit asks for), and deleting the account here does not take it back.
+    expect(PRIVACY_WEB_ACCOUNT).toContain('Stripe, which handles the payment and is told that account id with it.');
+    expect(ACCOUNT_NOTES.deleteBody).toContain('The payment itself stays with Stripe, with the account id it was made under.');
   });
 
   it('leave the phone app with nothing: ACCOUNT_OFF draws and does nothing', async () => {

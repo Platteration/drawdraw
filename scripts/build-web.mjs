@@ -12,7 +12,10 @@
 //               that host reads (_headers and _redirects for Netlify, those and _routes.json for
 //               Cloudflare Pages, .htaccess for Apache, none for nginx, whose config is
 //               deploy/nginx.conf, or for GitHub Pages, which reads none), so no host serves
-//               another's config as a file;
+//               another's config as a file. Cloudflare Pages serves a project at the root of its
+//               domain, where functions/api/[[path]].js answers /api/*: a --base-url there is
+//               refused, since its pages, its bundle and its _routes.json would all name a path
+//               that project does not have;
 //               for GitHub Pages also write .nojekyll, without which a branch deploy runs Jekyll,
 //               which drops every path that starts with _ (the bundle is under _expo/). Without
 //               --host all three configs stay, and each host ignores the others'.
@@ -160,6 +163,11 @@ function parseArgs(argv) {
   }
   if (out.host !== null && !Object.hasOwn(HOST_CONFIGS, out.host)) {
     throw new Error(`--host is one of ${Object.keys(HOST_CONFIGS).join(', ')}, not ${out.host}`);
+  }
+  if (out.host === 'cloudflare' && out.baseUrl) {
+    throw new Error(
+      `--host cloudflare builds a site for the root of its domain: Cloudflare Pages serves a project there, and functions/api/[[path]].js answers /api/*, not ${out.baseUrl}/api/*. Leave out --base-url ${out.baseUrl}.`
+    );
   }
   return out;
 }

@@ -265,7 +265,10 @@ describe('the policy is the same in every place it is written', () => {
     // server/start.mjs on loopback (server/kit's Node adapter): ^~ so that no regular expression
     // location (the allow-list) takes the path first, and proxy_pass with no URI so the path
     // reaches the API as the browser sent it. The kit builds every address from APP_URL and
-    // never reads a forwarded header, so none is set.
+    // never reads a forwarded header, so none is set. What nginx answers there itself (the API
+    // not running, or too slow) is the site's 404 page, which the allow-list serves with every
+    // header: its own error page would carry this location's one header alone (e2e/hosts.mjs
+    // stops the API and reads what a real nginx sends).
     const api = NGINX_DIRECTIVES.filter((d) => d.blocks.join() === [NGINX_HTTPS[0], NGINX_API].join()).map((d) => d.words.join(' '));
     expect(api).toEqual([
       'proxy_pass http://127.0.0.1:8788',
@@ -273,8 +276,14 @@ describe('the policy is the same in every place it is written', () => {
       'proxy_set_header Connection ',
       'client_max_body_size 1m',
       'proxy_read_timeout 30s',
+      'error_page 502 504 /404.html',
       `add_header Strict-Transport-Security ${nginxHeaders().get('Strict-Transport-Security')} always`,
     ]);
+    // The API's own answers pass through as it sent them: with proxy_intercept_errors nginx would
+    // answer the API's own 502 (Stripe failing at checkout) with the site's page instead.
+    expect(NGINX_DIRECTIVES.filter((d) => d.words[0] === 'proxy_intercept_errors')).toEqual([]);
+    // The page it falls back on is one the allow-list serves.
+    expect(nginxAllowList().test('/404.html')).toBe(true);
     expect(NGINX).toMatch(/^ {2}location \^~ \/api\/ \{$/m);
     expect(NGINX.match(/^\s*location\b.*$/gm)?.map((l) => l.trim())).toEqual([
       'location = / {',
@@ -508,6 +517,19 @@ describe('caching', () => {
   });
 });
 
+describe('what the docs say about Pro on the website', () => {
+  // useEntitlements (src/lib/pro.ts) reads the stored Pro flag whenever the account has no shop,
+  // and the account has none until api/config has said so: a site whose api/config fails or is
+  // blocked is a site without a shop, flag and all. The docs once said the flag was never read
+  // on a site that sells Pro, which held only while api/config answered.
+  it.each(['README.md', 'SECURITY.md'])('%s says the flag is not read only while api/config answers', (doc) => {
+    const text = read(doc).replace(/\s+/g, ' ');
+    expect(text).not.toMatch(/Pro is what `api\/me` says and nothing else/);
+    expect(text).not.toMatch(/Where the site's API sells Pro, Pro is what/);
+    expect(text).toMatch(/`api\/config` does not answer \(the API down, or the request blocked/);
+  });
+});
+
 describe('/.well-known/security.txt', () => {
   const fields = new Map(
     read('public/.well-known/security.txt')
@@ -621,6 +643,25 @@ describe('scripts/build-web.mjs', () => {
     // With an --output-dir it would also refuse, so the host is what was refused first.
     expect(refuse('--host', 'iis', '--output-dir', '.')).toMatch(/--host is one of/);
     expect(refuse('--host', 'constructor', '--output-dir', '.')).toMatch(/--host is one of/);
+  });
+
+  it('refuses a Cloudflare Pages build under a sub-path, before it touches anything', () => {
+    // Pages serves a project at the root of its domain, and the one Function,
+    // functions/api/[[path]].js, answers /api/*: built for /x the page, its bundle and its
+    // _routes.json (/x/api/*) would all name paths that project does not have, and no Function
+    // would answer the page's api/. With an --output-dir it would also refuse, so this is what
+    // was refused first.
+    for (const order of [
+      ['--host', 'cloudflare', '--base-url', '/drawdraw'],
+      ['--base-url', '/drawdraw/', '--host=cloudflare'],
+    ]) {
+      expect(refuse(...order, '--output-dir', '.')).toMatch(/--host cloudflare builds a site for the root of its domain/);
+    }
+    // The other hosts take a sub-path (GitHub Pages is what the docs build one for): what stops
+    // this one is the folder, not the base.
+    const pages = refuse('--host', 'github-pages', '--base-url', '/drawdraw', '--output-dir', '.');
+    expect(pages).toMatch(/--output-dir is a folder inside the project, not \./);
+    expect(pages).not.toMatch(/root of its domain/);
   });
 
   it('refuses a base path that is not one', () => {

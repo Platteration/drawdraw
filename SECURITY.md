@@ -42,11 +42,13 @@ The website runs the app in the visitor's browser: the portrait is read there
 and never uploaded, and the page connects to nothing but its own site's `api/`
 (`connect-src 'self'`). What it keeps is the settings and the Pro flag, in the
 browser's storage for the site's origin. On the web that flag is a record the
-visitor can edit. Where the site's API sells Pro, Pro is what `api/me` reports
-for the signed-in visitor, granted only by Stripe's signed webhook, and the flag
-is not read for it; where it does not, nothing is sold and nothing depends on
-the flag. Either way Pro unlocks drawing aids in a page the visitor runs, so
-someone who edits the page can turn them on without paying: that is not a
+visitor can edit. While the site's API answers that it sells Pro, Pro is what
+`api/me` reports for the signed-in visitor, granted only by Stripe's signed
+webhook, and the flag is not read for it. Where it sells nothing, or its
+`api/config` does not answer (the API down, or the request blocked, which the
+visitor can arrange), the page is a site without a shop and the flag is Pro.
+Either way Pro unlocks drawing aids in a page the visitor runs, so someone who
+edits the page, or the flag, can turn them on without paying: that is not a
 vulnerability, and the server's record of a purchase is what a sale is. A site
 published as a GitHub Pages project site shares its origin, and so its storage,
 with every other site the account publishes; README.md, "Deploy", recommends a

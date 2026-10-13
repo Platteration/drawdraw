@@ -217,7 +217,14 @@ describe('a host of its own: server/start.mjs through the Node adapter', () => {
     assert.equal(asked.get('line_items[0][price]'), 'price_drawdrawProFake');
     assert.equal(asked.get('metadata[app]'), 'drawdraw');
     assert.equal(asked.get('metadata[product]'), 'pro');
+    // What Stripe is told about the visitor: their account id (Google's), as the session's
+    // reference and in the metadata it copies onto the payment, where it stays after Delete
+    // account. The About card and the delete prompt say so (PRIVACY_WEB_ACCOUNT, ACCOUNT_NOTES in
+    // src/lib/account.ts); never their email address.
     assert.equal(asked.get('metadata[user]'), 'google:1001');
+    assert.equal(asked.get('client_reference_id'), 'google:1001');
+    assert.equal(asked.get('payment_intent_data[metadata][user]'), 'google:1001');
+    assert.ok(![...asked.values()].some((value) => value.includes('ada@example.com')));
     assert.equal(asked.get('success_url'), `${APP_URL}?purchase=success`);
     assert.equal(asked.get('cancel_url'), `${APP_URL}?purchase=cancelled`);
 

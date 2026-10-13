@@ -52,12 +52,17 @@ async function write(entitlements: Entitlements): Promise<void> {
  * that gates on `pro` has to wait for this or it shows a paying customer the
  * free build for a frame.
  *
- * On a website whose api/ sells Pro (`account.shop`, from useAccount.ts), Pro
- * is what `GET api/me` reports and nothing else: the server's record of a paid
- * Checkout is the purchase, and the flag in this browser's storage is not read
- * for it (it is left where it is). `ready` then also waits for the account to
- * settle. Everywhere else (the phone app, and a website with no shop) the
- * stored flag is Pro, as it always was.
+ * On a website whose api/ has said it sells Pro (`account.shop`, from
+ * useAccount.ts), Pro is what `GET api/me` reports: the server's record of a
+ * paid Checkout is the purchase, and the flag in this browser's storage is not
+ * read for it (it is left where it is). `ready` then also waits for the account
+ * to settle. Everywhere else the stored flag is Pro, as it always was: the
+ * phone app, a website with no shop, and a website whose api/config has not
+ * answered (failed, blocked, or not yet, past the first frame's limit), which
+ * is drawn as a site without a shop until it does. On the web nothing sets the
+ * flag (the store provider there sells nothing), so only someone who wrote it
+ * into storage has it; like editing the page, that unlocks drawing aids and
+ * takes nothing from the server's record.
  */
 export interface EntitlementState {
   pro: boolean;

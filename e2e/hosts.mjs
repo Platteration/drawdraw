@@ -7,8 +7,10 @@
  * still not be sent: Apache's `env=HTTPS` sent no HSTS behind a proxy that ends TLS, an add_header
  * in an nginx location drops every header the server sets, and nginx 1.24 refused the whole file
  * over `http2 on;` (1.25.1 and later only). The site's API (server/start.mjs) runs beside them, with
- * nothing configured: nginx's `location ^~ /api/` and the ProxyPass README.md gives Apache must
- * hand it api/, and it must answer with its own headers, not the site's.
+ * nothing configured: nginx's `location ^~ /api/` and the lines README.md gives Apache must hand it
+ * api/, and it must answer with its own headers, not the site's. Then the API is stopped, and what
+ * each server answers in its place must be the site's 404 page with every header: nginx's own 502
+ * page went out with HSTS alone, and Apache's 503 page with none.
  *
  * Needs nginx, Apache as Debian and Ubuntu lay it out (/usr/sbin/apache2, its modules in
  * /usr/lib/apache2/modules) and openssl, which GitHub's ubuntu-24.04 runner has, at the versions
@@ -97,10 +99,10 @@ const freePort = () =>
   });
 
 /** One request, answered: status, headers and body. The test's own certificate is accepted. */
-const get = (url, headers = {}) =>
+const get = (url, headers = {}, method = 'GET') =>
   new Promise((done, fail) => {
     const client = url.startsWith('https:') ? https : http;
-    const request = client.get(url, { headers, rejectUnauthorized: false, agent: false }, (res) => {
+    const request = client.request(url, { method, headers, rejectUnauthorized: false, agent: false }, (res) => {
       let body = '';
       res.setEncoding('utf8');
       res.on('data', (chunk) => (body += chunk));
@@ -108,6 +110,7 @@ const get = (url, headers = {}) =>
     });
     request.on('error', fail);
     request.setTimeout(10000, () => request.destroy(new Error(`${url}: no answer in 10 s`)));
+    request.end();
   });
 
 async function waitFor(url, log) {
@@ -238,7 +241,58 @@ async function startApi() {
   child.stderr.on('data', (d) => (output += d));
   children.push(child);
   await waitFor(`http://127.0.0.1:${port}/api/config`, () => output);
-  return port;
+  const stop = async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const gone = new Promise((done) => child.once('exit', done));
+      child.kill('SIGTERM');
+      await gone;
+    }
+  };
+  return { port, stop };
+}
+
+/**
+ * The lines README.md's Apache row says go in the virtual host for the API: one ProxyPass and the
+ * ErrorDocument lines beside it, for a site under BASE and an API on `apiPort`. Read from the
+ * README, so the lines it gives are the lines tested.
+ */
+function apacheApiLines(apiPort) {
+  const row = readFileSync(join(root, 'README.md'), 'utf8')
+    .split('\n')
+    .find((line) => line.startsWith('| Apache 2.4 |'));
+  const spans = [...(row ?? '').matchAll(/`((?:ProxyPass|ErrorDocument) [^`]*)`/g)].map((m) => m[1]);
+  const proxy = spans.filter((l) => l.startsWith('ProxyPass '));
+  const errors = spans.filter((l) => l.startsWith('ErrorDocument '));
+  check(
+    "README.md's Apache row gives one ProxyPass for api/, and the site's 404 page for each error the proxy answers itself",
+    proxy.length === 1 &&
+      proxy[0] === 'ProxyPass "/api/" "http://127.0.0.1:8788/api/"' &&
+      JSON.stringify(errors) === JSON.stringify(['502', '503', '504'].map((code) => `ErrorDocument ${code} /404.html`)),
+    spans.join(' | ')
+  );
+  return [
+    ...proxy.map((l) => l.replace('"/api/"', `"${BASE}/api/"`).replace('http://127.0.0.1:8788/api/', `http://127.0.0.1:${apiPort}${BASE}/api/`)),
+    ...errors.map((l) => l.replace(/ \/404\.html$/, ` ${BASE}/404.html`)),
+  ];
+}
+
+/**
+ * What a server answers under api/ while the API it hands the path to is not running: `status`,
+ * the one it chose, with the site's 404 page and every header the site's files carry, for the
+ * page's question and for the requests that change something.
+ */
+async function apiDownChecks(label, origin, status, requestHeaders = {}) {
+  const wrong = [];
+  for (const [method, path] of [['GET', '/api/config'], ['GET', '/api/me'], ['POST', '/api/checkout'], ['DELETE', '/api/me']]) {
+    const response = await get(`${origin}${path}`, requestHeaders, method);
+    if (response.status !== status) wrong.push(`${method} ${path} answered ${response.status}`);
+    if (!response.body.includes(NOT_FOUND)) wrong.push(`${method} ${path} is not the site's 404 page: ${response.body.slice(0, 60)}`);
+    for (const name of SECURITY) {
+      if (response.headers[name] !== want('/')[name]) wrong.push(`${method} ${path} ${name}: ${JSON.stringify(response.headers[name])}`);
+    }
+    if (response.headers['cache-control'] !== 'no-cache') wrong.push(`${method} ${path} cache-control: ${response.headers['cache-control']}`);
+  }
+  check(`${label}: with the API stopped, api/ is a ${status} with the site's 404 page and every header`, wrong.length === 0, wrong.slice(0, 4).join(' | '));
 }
 
 /**
@@ -316,7 +370,7 @@ async function nginx(apiPort) {
 
   const test = spawnSync(NGINX, ['-t', ...args], { encoding: 'utf8' });
   check(`${version} loads deploy/nginx.conf (nginx -t)`, test.status === 0 && !/\[emerg\]/.test(test.stderr), test.stderr.split('\n').find((l) => /emerg/.test(l)) ?? '');
-  if (test.status !== 0) return;
+  if (test.status !== 0) return null;
 
   const log = start(NGINX, [...args, '-g', 'daemon off;'], readLog(join(dir, 'logs/error.log')));
   const origin = `https://127.0.0.1:${tls}`;
@@ -331,6 +385,7 @@ async function nginx(apiPort) {
   check('nginx: plain HTTP is redirected to https, and names no version', redirect.status === 301 && redirect.headers.location === 'https://127.0.0.1/a/b?x=1' && redirect.headers.server === 'nginx', `${redirect.status} ${redirect.headers.location} ${redirect.headers.server}`);
   const page = await get(`${origin}/`);
   check('nginx: the site names no version', page.headers.server === 'nginx', page.headers.server);
+  return origin;
 }
 
 /**
@@ -395,9 +450,7 @@ async function apacheChecks(apiPort) {
 
   // .htaccess cannot proxy: the README's ProxyPass goes in the server's own configuration, and
   // answers api/ before the folder (and so its .htaccess and allow-list) is reached.
-  const proxied = await apache('apache-api', ['rewrite', 'headers', 'proxy', 'proxy_http'], [
-    `ProxyPass "${BASE}/api/" "http://127.0.0.1:${apiPort}${BASE}/api/"`,
-  ]);
+  const proxied = await apache('apache-api', ['rewrite', 'headers', 'proxy', 'proxy_http'], apacheApiLines(apiPort));
   await apiChecks(`Apache (${version}) with the README's ProxyPass`, proxied.origin, { 'X-Forwarded-Proto': 'https' });
   const page = await get(`${proxied.origin}/`, { 'X-Forwarded-Proto': 'https' });
   check('Apache with the ProxyPass still serves the site through its .htaccess', page.status === 200 && differences(page, '/').length === 0, differences(page, '/').join(' | '));
@@ -413,12 +466,17 @@ async function apacheChecks(apiPort) {
   }
   const said = /Invalid command '(RewriteEngine|Header)'/.test(bare.log());
   check('Apache without mod_rewrite and mod_headers serves nothing, and its log says why', served.length === 0 && said, [...served, ...(said ? [] : ['the log names no directive'])].join(' | '));
+  return { origin: proxied.origin, version };
 }
 
 try {
-  const apiPort = await startApi();
-  await nginx(apiPort);
-  await apacheChecks(apiPort);
+  const api = await startApi();
+  const nginxOrigin = await nginx(api.port);
+  const apacheApi = await apacheChecks(api.port);
+  // The API stopped, as on a host where it has not been started or has crashed.
+  await api.stop();
+  if (nginxOrigin) await apiDownChecks('nginx', nginxOrigin, 502);
+  await apiDownChecks(`Apache (${apacheApi.version}) with the README's lines`, apacheApi.origin, 503, { 'X-Forwarded-Proto': 'https' });
 } catch (err) {
   check('the servers ran to the end', false, err.message.split('\n').slice(0, 6).join(' | '));
 } finally {

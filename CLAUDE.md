@@ -120,11 +120,17 @@ also is. Run both (and `npm run check`) before pushing.
   page; navigates only to `api/auth/google/start` and to an address starting
   `https://checkout.stripe.com/`), its twin `src/lib/accountClient.ts` (what a phone
   build resolves: not configured, opens nothing), and `src/lib/useAccount.ts`, which
-  asks `api/config` once and leaves everything off for good on a 404, an error or no
-  answer within `LOAD_LIMIT_MS`. `useEntitlements(account)` in `pro.ts` takes Pro from
-  `api/me` while the site sells it, never from the stored flag, and is not `ready`
-  until the account has settled. `appConfig.test.ts`'s no-network scan exempts exactly
-  `accountClient.web.ts` and pins the twin inert.
+  asks `api/config` once and leaves everything off for good on a 404, an error or a
+  body that is not the kit's. An answer slower than `LOAD_LIMIT_MS` does not hold the
+  first frame, which is drawn without an account, and is applied when it comes (with
+  `api/me` and the address's `?purchase=`): stayed off for good, it showed a paying
+  visitor the free build for the whole visit. The notice line goes when a refresh
+  finds nobody signed in (sign-out, deletion, a session that ended), and an `api/me`
+  poll asked before that is not applied after it. `useEntitlements(account)` in
+  `pro.ts` takes Pro from `api/me` once `api/config` has said the site sells it, and
+  from the stored flag otherwise (a site without a shop, or whose `api/config` has not
+  answered), and is not `ready` until the account has settled. `appConfig.test.ts`'s
+  no-network scan exempts exactly `accountClient.web.ts` and pins the twin inert.
 - `tools/make-icons.mjs` — renders `assets/` from `headModel.ts`, which it
   imports by that name: Node strips the types itself from 22.18 on, which is
   why `engines.node` says `>=22.18`. Node warns once that the package has no
@@ -157,7 +163,10 @@ also is. Run both (and `npm run check`) before pushing.
   everything else the 404 page with every header, plain HTTP redirected, no
   version named, an Apache without `mod_rewrite` and `mod_headers` serving
   nothing, and `api/` handed to `server/start.mjs` with the API's own headers by
-  nginx's `location ^~ /api/` and by the README's Apache `ProxyPass`. `website.test.ts` reads `.htaccess` line by line (an `<IfModule>`
+  nginx's `location ^~ /api/` and by the README's Apache lines (read out of its
+  table), then, with the API stopped, answered by both with the site's 404 page and
+  every header (nginx's 502 through the location's `error_page`, Apache's 503 through
+  the README's `ErrorDocument`), never the server's own page. `website.test.ts` reads `.htaccess` line by line (an `<IfModule>`
   or a condition after a header's value fails it) and nginx.conf directive by
   directive (an `add_header` outside the HTTPS server, or `http2 on;`, fails
   it; the one stated exception is `location ^~ /api/`, whose one `add_header` is
@@ -183,7 +192,9 @@ also is. Run both (and `npm run check`) before pushing.
   `img-src blob:` is the picked portrait and the export's redrawn SVG;
   `connect-src 'self'` is the site's own `api/` (with `'none'` the page's
   `api/config` is refused). The build also writes `_routes.json` (`<base>/api/*`),
-  which only `--host cloudflare` keeps and `_redirects` refuses. A new
+  which only `--host cloudflare` keeps and `_redirects` refuses; `--host cloudflare`
+  refuses a `--base-url`, since Pages serves a project at the root of its domain and
+  `functions/api/[[path]].js` answers `/api/*` alone. A new
   file the site loads goes in the allow-lists and the `_headers` cache rules,
   and the test fails until it does.
 - `src/lib/webExport.ts` — exports in a browser. react-native-view-shot's web

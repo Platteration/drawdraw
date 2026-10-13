@@ -207,6 +207,15 @@ describe('on a website whose api/ sells Pro', () => {
     expect(current().ready).toBe(true);
   });
 
+  it('reads the stored flag where api/config has not said so: failed, blocked or not yet answered', async () => {
+    // useAccount.ts leaves the account off (ACCOUNT_OFF) until api/config answers, and the site is
+    // then one without a shop: README.md and SECURITY.md say so rather than that the flag is
+    // never read on a site that sells Pro.
+    jest.mocked(AsyncStorage.getItem).mockResolvedValue('{"pro":true}');
+    await mount(ACCOUNT_OFF);
+    expect(current().pro).toBe(true);
+  });
+
   it('keeps the stored flag where the site signs in but sells nothing, as it always did', async () => {
     jest.mocked(AsyncStorage.getItem).mockResolvedValue('{"pro":true}');
     await mount({ ...shop([]), shop: null });

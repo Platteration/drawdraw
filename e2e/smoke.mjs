@@ -23,8 +23,10 @@
  * functions/api/[[path]].js), its Google and Stripe the fakes of
  * server/fakes.mjs handed to the kit as its `fetch`, and the whole flow is
  * played under the site's policy: sign in with Google, buy Pro through
- * Checkout, Stripe's signed webhook, Pro drawn in the editor, sign out, sign
- * in again, delete the account, a refused sign-in and a cancelled Checkout.
+ * Checkout, Stripe's signed webhook, sign out (the thank-you going with it),
+ * sign in again, an api/config held past the first frame's limit and applied
+ * when it answers, Pro drawn in the editor, delete the account, a refused
+ * sign-in and a cancelled Checkout.
  *
  *   npm run test:e2e
  */
@@ -405,7 +407,17 @@ const API_HEADERS = {
 async function withApi() {
   const fakes = await createFakes();
   let handler = null;
-  const shop = await startHost({ dir: BUILD, base: BASE, api: (req, res) => handler(req, res) });
+  // While set, api/config is answered only once this settles: an API slower than the first
+  // frame's limit, which a cold Function asking Stripe for the price can be.
+  let heldConfig = null;
+  const shop = await startHost({
+    dir: BUILD,
+    base: BASE,
+    api: (req, res) => {
+      if (heldConfig && req.url.split('?')[0].endsWith('/api/config')) heldConfig.then(() => handler(req, res));
+      else handler(req, res);
+    },
+  });
   const logs = [];
   handler = createNodeHandler({
     catalogue,
@@ -539,7 +551,48 @@ async function withApi() {
     check('Stripe\'s signed webhook is taken', hook.status === 200, String(hook.status));
     check('the page asks api/me until Pro shows, then says thank you', await shows('Thank you — DrawDraw Pro is unlocked.'));
     check('and Pro is no longer offered', !(await footerOffersPro()));
-    await press('Dismiss');
+
+    // Signed out with the thank-you still up, not dismissed: it goes with the account rather than
+    // stand above a footer that offers Pro for sale again.
+    await press('Settings');
+    await press('Sign out');
+    check('signing out offers Sign in with Google again', await shows('Sign in with Google'));
+    await press('Close');
+    check('and Pro goes with the account', await footerOffersPro());
+    check('and so does the thank-you', (await p.getByRole('alert').count()) === 0 && !(await p.locator('body').innerText()).includes('Thank you'));
+
+    await signIn();
+    check('the purchase is the account\'s: signing in again brings Pro back', !(await footerOffersPro()));
+
+    // The same visitor, signed in and owning Pro, back from Checkout on a page whose api/config
+    // answers after the first frame's limit (LOAD_LIMIT_MS, five seconds): the page is drawn as a
+    // site without an account when the limit passes, and what api/config and api/me then say is
+    // applied, Pro included, rather than leaving a paying visitor the free build for the visit. In
+    // a context of its own with the visitor's session, and no Pro flag planted in its storage.
+    const late = await sitePage({}, { on: shop.site });
+    await late.context.addCookies(await visitor.context.cookies());
+    await late.page.addInitScript(() => localStorage.setItem('drawdraw.settings.v1', JSON.stringify({ seenIntro: true })));
+    let release = () => {};
+    heldConfig = new Promise((done) => (release = done));
+    const lateText = () => late.page.locator('body').innerText();
+    const lateOffersPro = async () => (await late.page.getByText('Unlock Pro', { exact: true }).filter({ visible: true }).count()) === 1;
+    try {
+      await late.page.goto(`${shop.site}?purchase=success`, { waitUntil: 'load' });
+      await late.page.getByText('Choose a portrait', { exact: true }).filter({ visible: true }).first().waitFor({ timeout: 15000 });
+      check('an api/config held past the limit: the page is drawn without an account, Pro offered', (await lateOffersPro()) && new URL(late.page.url()).search === '?purchase=success');
+      release();
+      const thanked = await late.page.getByText('Thank you — DrawDraw Pro is unlocked.', { exact: true }).filter({ visible: true }).first().waitFor({ timeout: 20000 }).then(() => true, () => false);
+      check('and when it answers, the account is applied: Checkout\'s thank-you, the address cleaned', thanked && new URL(late.page.url()).search === '', late.page.url());
+      check('and Pro is what api/me says: no longer offered', !(await lateOffersPro()));
+      await late.page.getByText('Settings', { exact: true }).filter({ visible: true }).first().click();
+      const named = await late.page.getByText('Signed in as ada@example.com', { exact: true }).filter({ visible: true }).first().waitFor({ timeout: 10000 }).then(() => true, () => false);
+      check('and Settings names who is signed in', named, named ? '' : (await lateText()).replace(/\s+/g, ' ').slice(0, 160));
+      check('a late api/config raised no violation, page or console error, and asked nothing outside the site', late.problems.length === 0, late.problems.slice(0, 3).join(' | '));
+    } finally {
+      release();
+      heldConfig = null;
+      await late.context.close();
+    }
 
     // Pro drawn: the editor's Pro construction lines are no longer locked.
     const chooser = p.waitForEvent('filechooser');
@@ -550,15 +603,6 @@ async function withApi() {
     check('the editor draws Pro\'s construction lines unlocked', (await shows('Jaw')) && (await p.getByText('Jaw ✦').count()) === 0);
     await press('‹ Portraits');
     await home();
-
-    await press('Settings');
-    await press('Sign out');
-    check('signing out offers Sign in with Google again', await shows('Sign in with Google'));
-    await press('Close');
-    check('and Pro goes with the account', await footerOffersPro());
-
-    await signIn();
-    check('the purchase is the account\'s: signing in again brings Pro back', !(await footerOffersPro()));
 
     await press('Settings');
     dialogs.length = 0;
