@@ -10,7 +10,7 @@
     "web": "expo start --web",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "jest",
+    "test": "node --test server/kit/selftest.mjs server/api.test.mjs && jest",
     "test:conventions": "node --test test/conventions.mjs",
     "check": "npm run lint && npm run typecheck && npm test && npm run test:conventions",
     "icons": "node tools/make-icons.mjs",

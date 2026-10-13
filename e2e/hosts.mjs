@@ -6,7 +6,9 @@
  * public/_headers; only a server shows what a file makes it do. A header can be written right and
  * still not be sent: Apache's `env=HTTPS` sent no HSTS behind a proxy that ends TLS, an add_header
  * in an nginx location drops every header the server sets, and nginx 1.24 refused the whole file
- * over `http2 on;` (1.25.1 and later only).
+ * over `http2 on;` (1.25.1 and later only). The site's API (server/start.mjs) runs beside them, with
+ * nothing configured: nginx's `location ^~ /api/` and the ProxyPass README.md gives Apache must
+ * hand it api/, and it must answer with its own headers, not the site's.
  *
  * Needs nginx, Apache as Debian and Ubuntu lay it out (/usr/sbin/apache2, its modules in
  * /usr/lib/apache2/modules) and openssl, which GitHub's ubuntu-24.04 runner has, at the versions
@@ -32,7 +34,15 @@ const BUILD = join(root, process.env.WEB_BUILD_DIR || '.web-build');
 const BASE = process.env.WEB_BASE_URL || '/drawdraw';
 const MODULES = '/usr/lib/apache2/modules';
 const NOT_FOUND = 'That page isn’t here';
-const CONFIGS = ['_headers', '_redirects', '.htaccess'];
+const CONFIGS = ['_headers', '_redirects', '.htaccess', '_routes.json'];
+/** The headers server/kit sends on every answer of its own (server/kit/http.js). */
+const API_HEADERS = {
+  'content-type': 'application/json; charset=utf-8',
+  'x-content-type-options': 'nosniff',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  'referrer-policy': 'no-referrer',
+  'cross-origin-resource-policy': 'same-origin',
+};
 
 const which = (name, fallback) => {
   const found = spawnSync('sh', ['-c', `command -v ${name}`], { encoding: 'utf8' }).stdout.trim();
@@ -156,6 +166,7 @@ const REFUSED = [
   ...Object.keys(PLANTED).map((f) => `/${f}`),
   '/_headers',
   '/_redirects',
+  '/_routes.json',
   '//_headers',
   '/_expo/',
   '/_expo/static/',
@@ -210,7 +221,52 @@ function start(command, args, log) {
 }
 const readLog = (file) => () => (existsSync(file) ? readFileSync(file, 'utf8') : '');
 
-async function nginx() {
+/**
+ * The site's API as a host of its own runs it: server/start.mjs, with a data directory and a
+ * port and none of the kit's variables, so `api/config` says nothing is on and every other route
+ * is the kit's JSON 404.
+ */
+async function startApi() {
+  const port = await freePort();
+  const data = join(work, 'api-data');
+  const child = spawn(process.execPath, [join(root, 'server/start.mjs')], {
+    env: { PATH: process.env.PATH ?? '', KIT_DATA_DIR: data, KIT_PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', (d) => (output += d));
+  child.stderr.on('data', (d) => (output += d));
+  children.push(child);
+  await waitFor(`http://127.0.0.1:${port}/api/config`, () => output);
+  return port;
+}
+
+/**
+ * What a server answers under api/ when it hands the path to the API: the API's own JSON and
+ * headers, none of the site's (a host that added the site's beside them would send two policies),
+ * and `extra`, the headers the host itself adds there.
+ */
+async function apiChecks(label, origin, requestHeaders = {}, extra = {}) {
+  const wrong = [];
+  const config = await get(`${origin}/api/config`, requestHeaders);
+  if (config.status !== 200) wrong.push(`api/config answered ${config.status}`);
+  if (config.body !== JSON.stringify({ auth: { google: false }, shop: { products: [] } })) wrong.push(`api/config said ${config.body.slice(0, 80)}`);
+  if (config.headers['cache-control'] !== 'public, max-age=60') wrong.push(`api/config cache-control: ${config.headers['cache-control']}`);
+  const missing = await get(`${origin}/api/me`, requestHeaders);
+  if (missing.status !== 404 || missing.body.includes(NOT_FOUND)) wrong.push(`api/me answered ${missing.status}, ${missing.body.slice(0, 40)}`);
+  if (missing.headers['cache-control'] !== 'no-store') wrong.push(`api/me cache-control: ${missing.headers['cache-control']}`);
+  for (const response of [config, missing]) {
+    for (const [name, value] of Object.entries({ ...API_HEADERS, ...extra })) {
+      if (response.headers[name] !== value) wrong.push(`${name}: ${JSON.stringify(response.headers[name])}`);
+    }
+    for (const name of SECURITY.filter((n) => !Object.hasOwn(API_HEADERS, n) && !Object.hasOwn(extra, n))) {
+      if (response.headers[name] !== undefined) wrong.push(`the site's ${name} sent beside the API's`);
+    }
+  }
+  check(`${label}: api/ is the site's API, with its own headers and none of the site's`, wrong.length === 0, wrong.slice(0, 4).join(' | '));
+}
+
+async function nginx(apiPort) {
   const dir = join(work, 'nginx');
   mkdirSync(join(dir, 'logs'), { recursive: true });
   spawnSync(OPENSSL, ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-subj', '/CN=localhost', '-days', '1', '-keyout', join(dir, 'key.pem'), '-out', join(dir, 'cert.pem')], { stdio: 'ignore' });
@@ -233,6 +289,7 @@ async function nginx() {
   edit('  root /var/www/drawdraw;\n', `  root ${site};\n`);
   edit('/etc/letsencrypt/live/example.com/fullchain.pem', join(dir, 'cert.pem'));
   edit('/etc/letsencrypt/live/example.com/privkey.pem', join(dir, 'key.pem'));
+  edit('    proxy_pass http://127.0.0.1:8788;\n', `    proxy_pass http://127.0.0.1:${apiPort};\n`);
   check('deploy/nginx.conf has the lines its header says to change, once each', edits.length === 0, edits.join(' | '));
   writeFileSync(join(dir, 'site.conf'), conf);
   // The http {} block a stock Debian or Ubuntu nginx.conf includes it from, less the logging.
@@ -267,6 +324,8 @@ async function nginx() {
 
   // nginx.conf is written for a site at the root of its domain, so the site is there.
   await sameSite('nginx', origin);
+  // The one header nginx adds to the API's answers is its Strict-Transport-Security line.
+  await apiChecks('nginx', origin, {}, { 'strict-transport-security': want('/')['strict-transport-security'] });
 
   const redirect = await get(`http://127.0.0.1:${plain}/a/b?x=1`);
   check('nginx: plain HTTP is redirected to https, and names no version', redirect.status === 301 && redirect.headers.location === 'https://127.0.0.1/a/b?x=1' && redirect.headers.server === 'nginx', `${redirect.status} ${redirect.headers.location} ${redirect.headers.server}`);
@@ -280,7 +339,7 @@ async function nginx() {
  * `modules`, `AllowOverride FileInfo Options` and `ServerTokens Prod`. The site is under BASE, as
  * it was built, through an Alias.
  */
-async function apache(label, modules) {
+async function apache(label, modules, extra = []) {
   const dir = join(work, label);
   mkdirSync(dir, { recursive: true });
   const port = await freePort();
@@ -307,6 +366,7 @@ async function apache(label, modules) {
       '<FilesMatch "^\\.ht">',
       '  Require all denied',
       '</FilesMatch>',
+      ...extra,
       `Alias ${BASE} ${site}`,
       `<Directory ${site}>`,
       '  Options Indexes FollowSymLinks',
@@ -323,7 +383,7 @@ async function apache(label, modules) {
   return { origin, log, version };
 }
 
-async function apacheChecks() {
+async function apacheChecks(apiPort) {
   const { origin, version } = await apache('apache', ['rewrite', 'headers']);
   // Behind a proxy that ends TLS, which is what the redirect's X-Forwarded-Proto is for: this
   // Apache speaks plain HTTP, and the proxy says the visitor used https.
@@ -332,6 +392,15 @@ async function apacheChecks() {
   const redirect = await get(`${origin}/a?x=1`);
   check('Apache: plain HTTP is redirected to https', redirect.status === 301 && redirect.headers.location === `https://127.0.0.1:${new URL(origin).port}${BASE}/a?x=1`, `${redirect.status} ${redirect.headers.location}`);
   check('Apache under the README\'s `ServerTokens Prod` names no version', redirect.headers.server === 'Apache', redirect.headers.server);
+
+  // .htaccess cannot proxy: the README's ProxyPass goes in the server's own configuration, and
+  // answers api/ before the folder (and so its .htaccess and allow-list) is reached.
+  const proxied = await apache('apache-api', ['rewrite', 'headers', 'proxy', 'proxy_http'], [
+    `ProxyPass "${BASE}/api/" "http://127.0.0.1:${apiPort}${BASE}/api/"`,
+  ]);
+  await apiChecks(`Apache (${version}) with the README's ProxyPass`, proxied.origin, { 'X-Forwarded-Proto': 'https' });
+  const page = await get(`${proxied.origin}/`, { 'X-Forwarded-Proto': 'https' });
+  check('Apache with the ProxyPass still serves the site through its .htaccess', page.status === 200 && differences(page, '/').length === 0, differences(page, '/').join(' | '));
 
   const bare = await apache('apache-bare', []);
   // Debian and Ubuntu ship with both off. A site served without them would hand out every file
@@ -347,8 +416,9 @@ async function apacheChecks() {
 }
 
 try {
-  await nginx();
-  await apacheChecks();
+  const apiPort = await startApi();
+  await nginx(apiPort);
+  await apacheChecks(apiPort);
 } catch (err) {
   check('the servers ran to the end', false, err.message.split('\n').slice(0, 6).join(' | '));
 } finally {

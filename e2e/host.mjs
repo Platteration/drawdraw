@@ -6,6 +6,13 @@
  *
  * Every request outside the base path is answered 404 and recorded, so a
  * page that reaches for anything but its own site is caught.
+ *
+ * With `api`, the site's API answers `<base>/api/*` as Cloudflare Pages runs
+ * functions/api/[[path]].js beside the files: the request goes to it whole,
+ * and its answer carries its own headers, not `_headers'` (Pages applies
+ * neither `_headers` nor `_redirects` to a Function's response). Without it,
+ * `api/` is a missing path like any other: the site's 404 page, as GitHub
+ * Pages and Netlify answer it.
  */
 import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -81,7 +88,7 @@ function sitePath(url, base) {
   return path.slice(base.length) || '/';
 }
 
-export async function startHost({ dir, base }) {
+export async function startHost({ dir, base, api = null }) {
   const root = resolve(dir);
   const rules = parseHeaders(readFileSync(join(root, '_headers'), 'utf8'));
   const refused = refusedPaths(readFileSync(join(root, '_redirects'), 'utf8'));
@@ -103,6 +110,11 @@ export async function startHost({ dir, base }) {
       outside.push(req.url);
       res.writeHead(404, { 'Content-Type': 'text/plain' });
       res.end('outside the site');
+      return;
+    }
+    if (api && path.startsWith('/api/')) {
+      served.push({ path, status: 'api' });
+      api(req, res);
       return;
     }
     if (path === '/' && req.url.split('?')[0] === base) {

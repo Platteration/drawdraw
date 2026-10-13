@@ -160,6 +160,8 @@ function nginxDirectives(text: string): { words: string[]; blocks: string[] }[] 
 const NGINX_DIRECTIVES = nginxDirectives(NGINX);
 /** The server block that answers HTTPS, as `nginxDirectives` names it. */
 const NGINX_HTTPS = NGINX_DIRECTIVES.find((d) => d.words[0] === 'listen' && /^(\S+:)?443$/.test(d.words[1] ?? ''))?.blocks ?? [];
+/** The location that proxies api/ to the site's API, as `nginxDirectives` names it. */
+const NGINX_API = NGINX_DIRECTIVES.find((d) => d.words[0] === 'proxy_pass')?.blocks.at(-1) ?? 'no proxy_pass';
 
 /** `add_header Name "value" always;` in nginx.conf's HTTPS server, the only place one may be. */
 function nginxHeaders(): Map<string, string> {
@@ -235,17 +237,52 @@ describe('the policy is the same in every place it is written', () => {
     expect(HTACCESS).not.toMatch(/^\s*<IfModule/m);
   });
 
-  it('nginx sets every header for the whole HTTPS server, on every answer, and in no location', () => {
+  it("nginx sets every header for the whole HTTPS server, on every answer, and in no location but the API's", () => {
     // nginx inherits add_header into a location only when the location sets none of its own: one
     // add_header there drops every header the server sets, for every path it matches. Without
     // `always`, none is sent with an error, the 404 page among them.
     expect(NGINX_HTTPS).toEqual([expect.stringMatching(/^server#\d+$/)]);
     const headers = NGINX_DIRECTIVES.filter((d) => d.words[0] === 'add_header');
-    expect(headers).toHaveLength(SECURITY_HEADERS.length + 1); // and Cache-Control
-    for (const { words, blocks } of headers) expect([words, blocks]).toEqual([[...words.slice(0, 3), 'always'], NGINX_HTTPS]);
-    // A header moved into a location is read as sitting there, and so fails the line above.
+    const server = headers.filter((d) => d.blocks.join() === NGINX_HTTPS.join());
+    expect(server).toHaveLength(SECURITY_HEADERS.length + 1); // and Cache-Control
+    for (const { words, blocks } of server) expect([words, blocks]).toEqual([[...words.slice(0, 3), 'always'], NGINX_HTTPS]);
+    // The one stated exception: the API's location, which sends the API's own headers alone and
+    // repeats the server's Strict-Transport-Security line exactly, as server/kit/README.md asks.
+    const elsewhere = headers.filter((d) => d.blocks.join() !== NGINX_HTTPS.join());
+    expect(elsewhere).toEqual([
+      {
+        words: ['add_header', 'Strict-Transport-Security', nginxHeaders().get('Strict-Transport-Security'), 'always'],
+        blocks: [NGINX_HTTPS[0], NGINX_API],
+      },
+    ]);
+    // A header moved into any other location is read as sitting there, and so fails the lines above.
     const moved = nginxDirectives(NGINX.replace('    return 404;\n', '    add_header X-Robots-Tag "noindex" always;\n    return 404;\n'));
     expect(moved.find((d) => d.words[1] === 'X-Robots-Tag')?.blocks).toEqual([NGINX_HTTPS[0], expect.stringMatching(/^location#/)]);
+    expect(moved.find((d) => d.words[1] === 'X-Robots-Tag')?.blocks).not.toEqual([NGINX_HTTPS[0], NGINX_API]);
+  });
+
+  it("nginx hands api/ to the site's API, unchanged, and nothing else", () => {
+    // server/start.mjs on loopback (server/kit's Node adapter): ^~ so that no regular expression
+    // location (the allow-list) takes the path first, and proxy_pass with no URI so the path
+    // reaches the API as the browser sent it. The kit builds every address from APP_URL and
+    // never reads a forwarded header, so none is set.
+    const api = NGINX_DIRECTIVES.filter((d) => d.blocks.join() === [NGINX_HTTPS[0], NGINX_API].join()).map((d) => d.words.join(' '));
+    expect(api).toEqual([
+      'proxy_pass http://127.0.0.1:8788',
+      'proxy_http_version 1.1',
+      'proxy_set_header Connection ',
+      'client_max_body_size 1m',
+      'proxy_read_timeout 30s',
+      `add_header Strict-Transport-Security ${nginxHeaders().get('Strict-Transport-Security')} always`,
+    ]);
+    expect(NGINX).toMatch(/^ {2}location \^~ \/api\/ \{$/m);
+    expect(NGINX.match(/^\s*location\b.*$/gm)?.map((l) => l.trim())).toEqual([
+      'location = / {',
+      `location ~ ${NGINX_ALLOW} {`,
+      'location / {',
+      'location ^~ /api/ {',
+    ]);
+    expect(NGINX_DIRECTIVES.filter((d) => (d.words[0] ?? '').startsWith('proxy_'))).toHaveLength(4);
   });
 
   it('nginx turns HTTP/2 on the way 1.24, the LTS one, reads it: a listen parameter, not the http2 directive', () => {
@@ -281,7 +318,9 @@ describe('the policy', () => {
     expect(directives.get('default-src')).toBe("'none'");
     expect(directives.get('script-src')).toBe("'self'");
     expect(csp).not.toMatch(/'unsafe-inline'|'unsafe-eval'|'unsafe-hashes'|\*|https?:|data:/);
-    expect(directives.get('connect-src')).toBe("'none'");
+    // The site's own api/ (server/kit: sign-in and the shop) and nothing else. Google and Stripe
+    // are top-level navigations, which no directive governs.
+    expect(directives.get('connect-src')).toBe("'self'");
     expect(directives.get('object-src')).toBe("'none'");
     expect(directives.get('base-uri')).toBe("'none'");
     expect(directives.get('form-action')).toBe("'none'");
@@ -331,6 +370,10 @@ const SITE_FILES = [...PUBLIC.filter((f) => !CONFIGS.includes(f)), 'favicon.ico'
 /** What a host must not serve, whether or not it is in the published folder. */
 const NOT_SITE = [
   ...CONFIGS,
+  '_routes.json',
+  'server/catalogue.js',
+  'server/kit/app.js',
+  'functions/api/[[path]].js',
   'README.md',
   'SECURITY.md',
   '.git/config',
@@ -429,9 +472,11 @@ describe('the hosts serve the site and nothing else', () => {
     expect(apacheRow).toContain('`ServerTokens Prod`');
   });
 
-  it('and Netlify refuses the one config file it would serve', () => {
-    // It reads _headers and _redirects and serves neither.
+  it('and Netlify refuses the config files it would serve', () => {
+    // It reads _headers and _redirects and serves neither; .htaccess is Apache's and
+    // _routes.json Cloudflare Pages'.
     expect(read('public/_redirects')).toMatch(/^\/\.htaccess\s+\/404\.html\s+404!$/m);
+    expect(read('public/_redirects')).toMatch(/^\/_routes\.json\s+\/404\.html\s+404!$/m);
   });
 });
 
@@ -530,14 +575,14 @@ describe('scripts/build-web.mjs', () => {
 
   it.each([
     ['netlify', ['_headers', '_redirects']],
-    ['cloudflare', ['_headers', '_redirects']],
+    ['cloudflare', ['_headers', '_redirects', '_routes.json']],
     ['apache', ['.htaccess']],
     ['nginx', []],
     ['github-pages', ['.nojekyll']],
   ])('--host %s keeps only the config that host reads', (host, kept) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drawdraw-site-'));
     try {
-      for (const f of ['_headers', '_redirects', '.htaccess', 'index.html']) fs.writeFileSync(path.join(dir, f), 'x');
+      for (const f of ['_headers', '_redirects', '.htaccess', '_routes.json', 'index.html']) fs.writeFileSync(path.join(dir, f), 'x');
       const script = `import { finishForHost } from './scripts/build-web.mjs'; finishForHost(${JSON.stringify(dir)}, ${JSON.stringify(host)});`;
       execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root });
       expect(fs.readdirSync(dir).sort()).toEqual([...kept, 'index.html'].sort());
@@ -558,6 +603,18 @@ describe('scripts/build-web.mjs', () => {
     );
     expect(commands.length).toBeGreaterThanOrEqual(2);
     for (const [doc, line] of commands) expect([doc, line]).toEqual([doc, expect.stringContaining('--host github-pages')]);
+  });
+
+  it.each([
+    ['', '/api/*'],
+    ['/drawdraw', '/drawdraw/api/*'],
+  ])('routes api/ alone to the Cloudflare Pages Function, for base %p', (base, route) => {
+    // Every other path is a file, served without invoking a function.
+    const script = `import { routesJson } from './scripts/build-web.mjs'; process.stdout.write(routesJson(${JSON.stringify(base)}));`;
+    const written = execFileSync(process.execPath, ['--input-type=module', '-e', script], { cwd: root, encoding: 'utf8' });
+    expect(JSON.parse(written)).toEqual({ version: 1, include: [route], exclude: [] });
+    // ...and the Function is the kit's entry with this app's catalogue, beside it in the repository.
+    expect(fs.existsSync(path.join(root, 'functions/api/[[path]].js'))).toBe(true);
   });
 
   it('refuses a host it does not know, before it touches anything', () => {

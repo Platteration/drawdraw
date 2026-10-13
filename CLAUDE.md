@@ -15,7 +15,7 @@ npx expo start          # run on a device via Expo Go
 npm run check           # the gate before a push: lint, type check, unit tests, conventions test
 npm run lint            # eslint, the shared Expo configuration
 npm run typecheck       # tsc --noEmit: strict, with noUncheckedIndexedAccess
-npm test                # jest, via the jest-expo preset
+npm test                # node --test server/kit/selftest.mjs server/api.test.mjs, then jest via the jest-expo preset
 npm run icons           # regenerate assets/ from the head model
 npm run build:web       # the website in .web-build/ (-- --host github-pages --base-url /drawdraw for a sub-path)
 npm run test:e2e        # build the website for /drawdraw/, drive it in a browser under its policy, then serve it from real nginx and Apache
@@ -27,8 +27,10 @@ lists the `jest` and `node` types because the tests read the file system;
 `@types/node` is a devDependency for that reason only, pinned to the Node 22
 line CI runs. `App.tsx`, `index.ts`, everything under `src/` and every test are
 TypeScript (jest matches `*.test.ts` and `*.test.tsx` only); the tools that run
-under plain Node (`tools/`, `e2e/`, `plugins/`, `scripts/`, the config files) and
-the website's own `public/guard.js` stay JavaScript. Jest's `testTimeout` is 15 s in `package.json`: a suite's first mount of a
+under plain Node (`tools/`, `e2e/`, `plugins/`, `scripts/`, the config files),
+the website's own `public/guard.js`, and the website's API (`server/`, `functions/`:
+JavaScript with JSDoc and `// @ts-check`, which `npm run typecheck` checks under this
+tsconfig, the kit included) stay JavaScript. Jest's `testTimeout` is 15 s in `package.json`: a suite's first mount of a
 screen (App, HomeScreen, EditorScreen) costs 3-4 s cold, measured here, and CI's
 runner went over the 5 s default in two of them; every other test takes under a
 second. Types describe what the code does: no `as` casts, no `any`, no
@@ -97,6 +99,32 @@ also is. Run both (and `npm run check`) before pushing.
   to `android/app/src/debug/AndroidManifest.xml` at prebuild, so a development
   build can load its bundle and the release build still has no network
   capability. `__tests__/appConfig.test.ts` holds both halves.
+- `server/kit/` — the shared sign-in, shop and webhook kit (sign in with Google,
+  Stripe Checkout and its signed webhook), byte for byte the canonical copy every
+  platteration repository carries, at this path. **Never edit it here**: a change is
+  made to the canonical copy and copied everywhere, and `diff -r` against it must be
+  empty. It lints under `eslint.config.js` and type-checks under `tsconfig.json`
+  with no ignore and no setting changed; its own tests are `server/kit/selftest.mjs`,
+  which `npm test` runs. Its `README.md` is the setup guide and the owner's checklist.
+- `server/catalogue.js` (what the website sells: `pro`, one payment, granting `pro`,
+  priced by `STRIPE_PRICE_PRO`), `server/start.mjs` (the API on a host of its own,
+  loopback, port 8788, records under `KIT_DATA_DIR`), `functions/api/[[path]].js`
+  (the kit's three-line Cloudflare Pages entry) and `server/package.json` (only
+  `"type": "module"`). `server/api.test.mjs` drives the catalogue through both entries
+  with `server/fakes.mjs`'s Google and Stripe handed to the kit as its `fetch`; no
+  test or shipped code points the kit at another host. The fakes are test tooling
+  and nothing the API imports.
+- The website's account in the page: `src/lib/account.ts` (pure: reads what `api/`
+  says field by field, the words, the privacy sentences), `src/lib/accountClient.web.ts`
+  (the one module that makes a request, to the site's own `api/`, relative to the
+  page; navigates only to `api/auth/google/start` and to an address starting
+  `https://checkout.stripe.com/`), its twin `src/lib/accountClient.ts` (what a phone
+  build resolves: not configured, opens nothing), and `src/lib/useAccount.ts`, which
+  asks `api/config` once and leaves everything off for good on a 404, an error or no
+  answer within `LOAD_LIMIT_MS`. `useEntitlements(account)` in `pro.ts` takes Pro from
+  `api/me` while the site sells it, never from the stored flag, and is not `ready`
+  until the account has settled. `appConfig.test.ts`'s no-network scan exempts exactly
+  `accountClient.web.ts` and pins the twin inert.
 - `tools/make-icons.mjs` — renders `assets/` from `headModel.ts`, which it
   imports by that name: Node strips the types itself from 22.18 on, which is
   why `engines.node` says `>=22.18`. Node warns once that the package has no
@@ -112,7 +140,14 @@ also is. Run both (and `npm run check`) before pushing.
   is how a runtime break — or a policy that blocks something real — gets caught
   when bundling still succeeds. `e2e/host.mjs` refuses `_headers`, `_redirects`
   and `_redirects`' 404 rules by the file a path resolves to, so `//_headers`
-  is refused like `/_headers`.
+  is refused like `/_headers`. Given `api`, it hands `<base>/api/*` to the site's
+  API as Cloudflare Pages does a Function, and the smoke test plays the whole
+  sign-in and shop flow there: Playwright routes no redirect's target (measured:
+  neither `page.route` nor `context.route` sees the browser follow the kit's 302 to
+  accounts.google.com), so the kit's answer to `api/auth/google/start` reaches the
+  browser as a `Refresh` to the same address, and `page.route` answers Google's
+  authorize URL with the redirect to the callback. A request to Google or Stripe
+  that no route answered fails the run.
 - `e2e/hosts.mjs` — the last step of `npm run test:e2e`: the same build served
   by the nginx and Apache installed on the machine (GitHub's Ubuntu runner has
   nginx 1.24 and Apache 2.4.58), `deploy/nginx.conf` loaded with only the lines
@@ -120,11 +155,14 @@ also is. Run both (and `npm run check`) before pushing.
   and `ServerTokens Prod`, and checks what they send: every site file with the
   headers `_headers` gives it (HSTS included behind a proxy that ends TLS),
   everything else the 404 page with every header, plain HTTP redirected, no
-  version named, and an Apache without `mod_rewrite` and `mod_headers` serving
-  nothing. `website.test.ts` reads `.htaccess` line by line (an `<IfModule>`
+  version named, an Apache without `mod_rewrite` and `mod_headers` serving
+  nothing, and `api/` handed to `server/start.mjs` with the API's own headers by
+  nginx's `location ^~ /api/` and by the README's Apache `ProxyPass`. `website.test.ts` reads `.htaccess` line by line (an `<IfModule>`
   or a condition after a header's value fails it) and nginx.conf directive by
   directive (an `add_header` outside the HTTPS server, or `http2 on;`, fails
-  it), but only a server shows what a file does. Where nginx, Apache or openssl
+  it; the one stated exception is `location ^~ /api/`, whose one `add_header` is
+  the server's Strict-Transport-Security line, so the API's own headers go out
+  alone), but only a server shows what a file does. Where nginx, Apache or openssl
   is missing it says so and passes, except under `CI`.
 - The website. `scripts/build-web.mjs` runs `expo export --platform web`, which
   copies `public/` into the site and fills in `public/index.html` (SDK 57's
@@ -142,7 +180,10 @@ also is. Run both (and `npm run check`) before pushing.
   the policy was measured in Chromium with the policy as a header: the one
   `style-src` hash is the empty string's, for react-native-web's empty
   `<style>` that it fills through the CSSOM (refused, the layout collapses);
-  `img-src blob:` is the picked portrait and the export's redrawn SVG. A new
+  `img-src blob:` is the picked portrait and the export's redrawn SVG;
+  `connect-src 'self'` is the site's own `api/` (with `'none'` the page's
+  `api/config` is refused). The build also writes `_routes.json` (`<base>/api/*`),
+  which only `--host cloudflare` keeps and `_redirects` refuses. A new
   file the site loads goes in the allow-lists and the `_headers` cache rules,
   and the test fails until it does.
 - `src/lib/webExport.ts` — exports in a browser. react-native-view-shot's web
@@ -175,8 +216,12 @@ also is. Run both (and `npm run check`) before pushing.
   empty stub, so a message through it is never seen), the home screen says a
   browser keeps settings but not portraits, and the Vibration row is disabled
   with its reason. Nothing may add an inline script, an inline style, a
-  connection or a third-party file to the page: the policy refuses them and the
-  e2e fails.
+  connection beyond the site's own `api/`, or a third-party file to the page:
+  the policy refuses them and the e2e fails. Google and Stripe are top-level
+  navigations, never a script, frame or image of theirs.
+- The website's sign-in and shop (`server/kit`) are web only and off until the owner
+  sets the keys; a site with no API behaves as it did before. The phone apps keep
+  their no-network posture (INTERNET blocked) and the store seam in `purchases.ts`.
 
 ## Native configuration
 
@@ -228,8 +273,14 @@ through it did nothing on the web build the e2e drives. There is no theme row: t
 `__tests__/appearance.test.ts` pins `userInterfaceStyle: light` to that. About shows the
 version from `expo-constants` (`Constants.expoConfig.version`, app.json's `version`; not yet
 checked on an EAS build, where `appVersionSource: remote` may need `expo-application` as the
-fallback) and the source link — the one URL the app hands to the OS, which
-`appConfig.test.ts` pins to that single `Linking.openURL` call.
+fallback), the source link — the one URL the app hands to the OS, which
+`appConfig.test.ts` pins to that single `Linking.openURL` call — and what leaves the
+device, exact for each build (`privacyLine` in `SettingsScreen.tsx`, the sentences in
+`src/lib/account.ts`): the phone app has no network access; the website sends nothing of the
+visitor's; a website whose API offers sign-in says what signing in and buying tell the site and
+Stripe. On such a site Settings also has an Account section (Sign in with Google; Signed in
+as …, Sign out, Delete account through `confirmAction`). The account lives on the server, not
+in a storage key: none is added to `KEYS`.
 
 ## Conventions
 

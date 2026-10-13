@@ -15,6 +15,7 @@ import React, { useEffect } from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { ACCOUNT_OFF, type AccountState } from '../account';
 import { purchases } from '../purchases';
 import { useEntitlements, type EntitlementState } from '../pro';
 
@@ -32,18 +33,18 @@ const current = (): EntitlementState => {
  * is written during render (react-hooks/globals); `act` flushes effects, so
  * every read below still sees the value of the latest render.
  */
-function Probe({ onValue }: { onValue: (value: EntitlementState) => void }) {
-  const value = useEntitlements();
+function Probe({ onValue, account }: { onValue: (value: EntitlementState) => void; account?: AccountState }) {
+  const value = useEntitlements(account);
   useEffect(() => onValue(value), [value, onValue]);
   return null;
 }
 
 let trees: ReactTestRenderer[] = [];
 
-async function mount() {
+async function mount(account?: AccountState) {
   let tree: ReactTestRenderer | undefined;
   await act(async () => {
-    tree = renderer.create(<Probe onValue={capture} />);
+    tree = renderer.create(<Probe onValue={capture} account={account} />);
   });
   if (!tree) throw new Error('nothing was rendered');
   trees.push(tree);
@@ -171,5 +172,44 @@ describe('ready', () => {
     await mount();
     expect(current().ready).toBe(true);
     expect(current().pro).toBe(false);
+  });
+});
+
+describe('on a website whose api/ sells Pro', () => {
+  const PRO = { id: 'pro', name: 'DrawDraw Pro', description: 'Everything.', price: null };
+  const shop = (entitlements: string[]): AccountState => ({
+    ...ACCOUNT_OFF,
+    signInOn: true,
+    shop: PRO,
+    user: { email: 'ada@example.com' },
+    entitlements,
+  });
+
+  it('is what api/me says, and never the flag stored in this browser', async () => {
+    // The server's record of a paid Checkout is the purchase; a flag anyone on
+    // the origin can write unlocks nothing while the site sells Pro.
+    jest.mocked(AsyncStorage.getItem).mockResolvedValue('{"pro":true}');
+    await mount(shop([]));
+    expect(current().pro).toBe(false);
+    jest.mocked(AsyncStorage.getItem).mockResolvedValue(null);
+    await mount(shop(['pro']));
+    expect(current().pro).toBe(true);
+    await mount(shop(['supporter']));
+    expect(current().pro).toBe(false);
+  });
+
+  it('waits for the account before it is ready', async () => {
+    // The first frame waits for this: a paying visitor is not shown the free
+    // build and then Pro.
+    await mount({ ...ACCOUNT_OFF, settled: false });
+    expect(current().ready).toBe(false);
+    await mount(shop(['pro']));
+    expect(current().ready).toBe(true);
+  });
+
+  it('keeps the stored flag where the site signs in but sells nothing, as it always did', async () => {
+    jest.mocked(AsyncStorage.getItem).mockResolvedValue('{"pro":true}');
+    await mount({ ...shop([]), shop: null });
+    expect(current().pro).toBe(true);
   });
 });

@@ -27,6 +27,12 @@
  * that is a deliberate trade: a determined user on a device they control can
  * set it, and building the infrastructure to stop them would cost more than
  * it recovers.
+ *
+ * The website is the exception, and not through this seam: where its own api/
+ * (server/kit) sells Pro through Stripe Checkout, the server's record of the
+ * payment is Pro and the flag is not read for it (src/lib/pro.ts,
+ * src/lib/useAccount.ts). The phone apps keep this seam, since the App Store
+ * and Google Play require their own in-app purchase for a digital unlock.
  */
 
 /**

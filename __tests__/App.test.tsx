@@ -30,6 +30,13 @@ jest.mock('../src/lib/feedback', () => ({
 // renders anything, and there is no native side here; the library's own mock
 // reports zero insets at once and leaves SafeAreaView the real component.
 jest.mock('react-native-safe-area-context', () => jest.requireActual('react-native-safe-area-context/jest/mock').default);
+// The website's account. In the phone app (what jest-expo resolves) it is the
+// inert twin's ACCOUNT_OFF; a test that plays the website sets `current` to the
+// account a site's api/ would give, for the whole of that test.
+const mockAccount: { current: import('../src/lib/account').AccountState | null } = { current: null };
+jest.mock('../src/lib/useAccount', () => ({
+  useAccount: () => mockAccount.current ?? jest.requireActual('../src/lib/useAccount').useAccount(),
+}));
 
 import React, { type ElementType } from 'react';
 import { Modal } from 'react-native';
@@ -38,6 +45,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import App from '../App';
+import AccountNotice from '../src/components/AccountNotice';
+import { ACCOUNT_OFF, type AccountState } from '../src/lib/account';
 import { setHapticsEnabled } from '../src/lib/feedback';
 import HomeScreen from '../src/screens/HomeScreen';
 import OnboardingScreen from '../src/screens/OnboardingScreen';
@@ -71,6 +80,7 @@ afterEach(async () => {
   if (rendered) await act(async () => rendered.unmount());
   tree = null;
   mockReads.clear();
+  mockAccount.current = null;
   jest.clearAllMocks();
 });
 
@@ -215,5 +225,76 @@ describe('the system bars', () => {
   it('keeps the paywall clear of them, inside its own Modal', async () => {
     await act(async () => root().findByType(HomeScreen).props.onRequestPro());
     insetWithinItsModal(root().findByType(PaywallScreen));
+  });
+});
+
+describe('on a website whose api/ sells Pro', () => {
+  const PRO = { id: 'pro', name: 'DrawDraw Pro', description: 'Everything.', price: null };
+  const site = (over: Partial<AccountState> = {}): AccountState => ({
+    ...ACCOUNT_OFF,
+    signInOn: true,
+    shop: PRO,
+    user: { email: 'ada@example.com' },
+    dismissNotice: jest.fn(),
+    ...over,
+  });
+  const render = async () => {
+    await act(async () => {
+      tree = renderer.create(<App />, { createNodeMock: () => ({ scrollTo: () => {} }) });
+    });
+  };
+  const rerender = async () => {
+    await act(async () => tree?.update(<App />));
+  };
+
+  it('shows nothing until the account has settled, then Pro as api/me says and not as this browser stored it', async () => {
+    mockReads.set(SETTINGS_KEY, Promise.resolve(SEEN));
+    mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(JSON.stringify({ pro: true })));
+    mockAccount.current = { ...site(), settled: false };
+    await render();
+    expect(root().findAllByType(HomeScreen)).toHaveLength(0);
+
+    mockAccount.current = site({ entitlements: [] });
+    await rerender();
+    expect(root().findByType(HomeScreen).props.pro).toBe(false);
+
+    mockAccount.current = site({ entitlements: ['pro'] });
+    await rerender();
+    expect(root().findByType(HomeScreen).props.pro).toBe(true);
+  });
+
+  it('hands the account to Settings and to the paywall', async () => {
+    mockReads.set(SETTINGS_KEY, Promise.resolve(SEEN));
+    mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
+    const account = site();
+    mockAccount.current = account;
+    await render();
+    await act(async () => root().findByType(HomeScreen).props.onOpenSettings());
+    expect(root().findByType(SettingsScreen).props.account).toBe(account);
+    await act(async () => root().findByType(HomeScreen).props.onRequestPro());
+    expect(root().findByType(PaywallScreen).props.account).toBe(account);
+  });
+
+  it('says what the account has to say above the screen, until it is dismissed', async () => {
+    mockReads.set(SETTINGS_KEY, Promise.resolve(SEEN));
+    mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
+    const account = site({ notice: 'Thank you — DrawDraw Pro is unlocked.' });
+    mockAccount.current = account;
+    await render();
+    const notice = root().findByType(AccountNotice);
+    expect(notice.props.notice).toBe('Thank you — DrawDraw Pro is unlocked.');
+    expect(notice.findByProps({ accessibilityRole: 'alert' })).toBeTruthy();
+    const dismiss = notice.findByProps({ accessibilityRole: 'button' });
+    await act(async () => dismiss.props.onPress());
+    expect(account.dismissNotice).toHaveBeenCalledTimes(1);
+  });
+
+  it('says nothing in the phone app', async () => {
+    mockReads.set(SETTINGS_KEY, Promise.resolve(SEEN));
+    mockReads.set(ENTITLEMENTS_KEY, Promise.resolve(null));
+    await render();
+    expect(root().findByType(AccountNotice).props.notice).toBeNull();
+    await act(async () => root().findByType(HomeScreen).props.onOpenSettings());
+    expect(root().findByType(SettingsScreen).props.account).toBe(ACCOUNT_OFF);
   });
 });

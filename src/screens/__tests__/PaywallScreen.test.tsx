@@ -9,11 +9,14 @@ jest.mock('@react-native-async-storage/async-storage', () => ({
   setItem: jest.fn(async () => {}),
   removeItem: jest.fn(async () => {}),
 }));
+jest.mock('../../lib/confirm', () => ({ confirmAction: jest.fn(), notify: jest.fn() }));
 
 import React from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { Text } from 'react-native';
 
+import { ACCOUNT_OFF, type AccountState } from '../../lib/account';
+import { notify } from '../../lib/confirm';
 import { notConfiguredProvider, PRODUCTS, setPurchaseProvider } from '../../lib/purchases';
 import PaywallScreen from '../PaywallScreen';
 
@@ -32,9 +35,12 @@ const buyLabel = () =>
     .map((t) => [].concat(t.props.children).join(''))
     .find((s) => s.startsWith('Unlock Pro'));
 
-async function mount() {
+const onPurchase = jest.fn(async () => {});
+const onRestore = jest.fn(async () => {});
+
+async function mount(account?: AccountState) {
   await act(async () => {
-    tree = renderer.create(<PaywallScreen onClose={() => {}} onPurchase={async () => {}} onRestore={async () => {}} />);
+    tree = renderer.create(<PaywallScreen onClose={() => {}} onPurchase={onPurchase} onRestore={onRestore} account={account} />);
   });
 }
 
@@ -69,4 +75,82 @@ it("shows the provider's price, not the listing's, once a store is configured", 
   } finally {
     setPurchaseProvider(notConfiguredProvider);
   }
+});
+
+describe('on a website whose api/ sells Pro', () => {
+  const PRO = {
+    id: 'pro',
+    name: 'DrawDraw Pro',
+    description: 'From the server, as text: <b>not markup</b>.',
+    price: { unitAmount: 799, currency: 'usd' },
+  };
+  const account = (over: Partial<AccountState> = {}): AccountState => ({
+    ...ACCOUNT_OFF,
+    signInOn: true,
+    shop: PRO,
+    signIn: jest.fn(),
+    buyPro: jest.fn(async () => null),
+    ...over,
+  });
+  const texts = () => root().findAllByType(Text).map((t) => [].concat(t.props.children).join(''));
+  const press = async (label: string) => {
+    const node = root()
+      .findAll((n) => n.props && typeof n.props.onPress === 'function' && typeof n.type !== 'string')
+      .find((n) => n.findAllByType(Text).some((t) => [].concat(t.props.children).join('') === label));
+    if (!node) throw new Error(`no control says ${label}`);
+    await act(async () => node.props.onPress());
+  };
+
+  beforeEach(() => jest.clearAllMocks());
+
+  it("shows the server's product and its price, formatted, and asks a signed-out visitor to sign in", async () => {
+    const a = account();
+    await mount(a);
+    expect(texts()).toEqual(expect.arrayContaining(['DrawDraw Pro', 'From the server, as text: <b>not markup</b>.']));
+    expect(texts().some((t) => /^\$7\.99$/.test(t))).toBe(true);
+    // The store provider's button and Restore are the phone app's; here signing in is the restore.
+    expect(texts().some((t) => t.startsWith('Unlock Pro'))).toBe(false);
+    expect(texts()).not.toContain('Restore purchase');
+    expect(texts()).not.toContain('Buy');
+    await press('Sign in to buy');
+    expect(a.signIn).toHaveBeenCalledTimes(1);
+    expect(a.buyPro).not.toHaveBeenCalled();
+  });
+
+  it('buys through Checkout once signed in, and never through the store provider', async () => {
+    const a = account({ user: { email: 'ada@example.com' } });
+    await mount(a);
+    await press('Buy');
+    expect(a.buyPro).toHaveBeenCalledTimes(1);
+    expect(onPurchase).not.toHaveBeenCalled();
+    expect(onRestore).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('says why when Checkout could not be opened', async () => {
+    const a = account({ user: { email: null }, buyPro: jest.fn(async () => 'DrawDraw Pro is not on sale right now.') });
+    await mount(a);
+    await press('Buy');
+    expect(notify).toHaveBeenCalledWith('Could not buy', 'DrawDraw Pro is not on sale right now.');
+  });
+
+  it('says Owned, and offers nothing, once the server says Pro is held', async () => {
+    await mount(account({ user: { email: null }, entitlements: ['pro'] }));
+    expect(texts()).toContain('Owned');
+    expect(texts()).not.toContain('Buy');
+    expect(texts()).not.toContain('Sign in to buy');
+  });
+
+  it('is sold without a price the server could not read', async () => {
+    await mount(account({ user: { email: null }, shop: { ...PRO, price: null } }));
+    expect(texts()).toContain('Buy');
+    expect(texts().some((t) => CURRENCY.test(t))).toBe(false);
+  });
+
+  it("is the store provider's screen, as it always was, on a site that signs in but sells nothing", async () => {
+    await mount(account({ shop: null, user: { email: null } }));
+    expect(buyLabel()).toBe('Unlock Pro · not available in this build');
+    expect(texts()).toContain('Restore purchase');
+    expect(texts()).not.toContain('Buy');
+  });
 });

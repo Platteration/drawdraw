@@ -3,6 +3,7 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path } from 'react-native-svg';
 
 import { colors, radius } from '../theme';
+import { ACCOUNT_OFF, PRO_ENTITLEMENT, WORDS, formatPrice, type AccountState } from '../lib/account';
 import { notify } from '../lib/confirm';
 import { errorCode, errorText } from '../lib/errors';
 import { buildHeadWireframe, HEAD_HEIGHT_UNITS, type ElementSet, type Polyline } from '../lib/headModel';
@@ -55,10 +56,19 @@ export interface PaywallScreenProps {
   onClose: () => void;
   onPurchase: (productId: string) => Promise<unknown>;
   onRestore: () => Promise<unknown>;
+  /**
+   * The website's account (src/lib/useAccount.ts). When its api/ sells Pro
+   * (`account.shop`), this screen sells it through Stripe's Checkout: the
+   * server's name, description and price, and Buy, Sign in to buy or Owned in
+   * place of the store provider's button and Restore. Elsewhere it is
+   * ACCOUNT_OFF and the screen is the store provider's, as it always was.
+   */
+  account?: AccountState;
 }
 
-export default function PaywallScreen({ onClose, onPurchase, onRestore }: PaywallScreenProps) {
+export default function PaywallScreen({ onClose, onPurchase, onRestore, account = ACCOUNT_OFF }: PaywallScreenProps) {
   const [busy, setBusy] = useState(false);
+  const shop = account.shop;
   // The listing is the app's own copy; the product is the provider's, and its
   // price is the only one shown. Reading PRODUCTS.pro.price here put "$7.99"
   // on the public web build, whose provider cannot sell anything.
@@ -91,6 +101,22 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }: Paywal
     }
   };
 
+  // Checkout leaves the page; anything else that ends it says why, through
+  // the app's own message, and the paywall stays where it is.
+  const buy = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const note = await account.buyPro();
+      if (note) notify('Could not buy', note);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const owned = account.entitlements.includes(PRO_ENTITLEMENT);
+  const price = shop?.price ? formatPrice(shop.price) : null;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -103,8 +129,8 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }: Paywal
         <View style={styles.art}>
           <FullHead />
         </View>
-        <Text style={styles.title}>{product?.title ?? listing.title}</Text>
-        <Text style={styles.blurb}>{product?.blurb ?? listing.blurb}</Text>
+        <Text style={styles.title}>{shop?.name ?? product?.title ?? listing.title}</Text>
+        <Text style={styles.blurb}>{shop?.description ?? product?.blurb ?? listing.blurb}</Text>
 
         <View style={styles.card}>
           <Text style={styles.cardLabel}>Pro adds</Text>
@@ -131,26 +157,45 @@ export default function PaywallScreen({ onClose, onPurchase, onRestore }: Paywal
         </Text>
       </ScrollView>
 
-      <View style={styles.footer}>
-        <Pressable
-          style={[styles.buy, busy && styles.buyDisabled]}
-          disabled={busy}
-          onPress={() => run(() => onPurchase(listing.id), 'Purchase')}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy }}
-        >
-          <Text style={styles.buyText}>{product ? `Unlock Pro · ${product.price}` : 'Unlock Pro'}</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => run(onRestore, 'Restore')}
-          disabled={busy}
-          hitSlop={10}
-          accessibilityRole="button"
-          accessibilityState={{ disabled: busy }}
-        >
-          <Text style={styles.restore}>Restore purchase</Text>
-        </Pressable>
-      </View>
+      {shop ? (
+        <View style={styles.footer}>
+          {price !== null && <Text style={styles.price}>{price}</Text>}
+          {owned ? (
+            <Text style={styles.owned}>{WORDS.owned}</Text>
+          ) : (
+            <Pressable
+              style={[styles.buy, busy && styles.buyDisabled]}
+              disabled={busy}
+              onPress={account.user ? buy : account.signIn}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: busy }}
+            >
+              <Text style={styles.buyText}>{account.user ? WORDS.buy : WORDS.signInToBuy}</Text>
+            </Pressable>
+          )}
+        </View>
+      ) : (
+        <View style={styles.footer}>
+          <Pressable
+            style={[styles.buy, busy && styles.buyDisabled]}
+            disabled={busy}
+            onPress={() => run(() => onPurchase(listing.id), 'Purchase')}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+          >
+            <Text style={styles.buyText}>{product ? `Unlock Pro · ${product.price}` : 'Unlock Pro'}</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => run(onRestore, 'Restore')}
+            disabled={busy}
+            hitSlop={10}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: busy }}
+          >
+            <Text style={styles.restore}>Restore purchase</Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }
@@ -263,5 +308,17 @@ const styles = StyleSheet.create({
     color: colors.graphiteSoft,
     fontSize: 13,
     fontWeight: '600',
+  },
+  price: {
+    color: colors.graphite,
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  // Graphite, not the accent: accent on paper measures 4.29:1, under WCAG AA at this size.
+  owned: {
+    color: colors.graphite,
+    fontSize: 15,
+    fontWeight: '700',
+    paddingVertical: 15,
   },
 });

@@ -3,6 +3,7 @@ import { Modal, StyleSheet } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
+import AccountNotice from './src/components/AccountNotice';
 import HomeScreen from './src/screens/HomeScreen';
 import EditorScreen from './src/screens/EditorScreen';
 import OnboardingScreen from './src/screens/OnboardingScreen';
@@ -10,6 +11,7 @@ import PaywallScreen from './src/screens/PaywallScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import { setHapticsEnabled } from './src/lib/feedback';
 import { useEntitlements } from './src/lib/pro';
+import { useAccount } from './src/lib/useAccount';
 import type { CreatedProject } from './src/lib/storage';
 import { resetSettings, type Settings } from './src/lib/settings';
 import { loadSettings, persistSettings } from './src/lib/settingsStore';
@@ -21,13 +23,18 @@ export default function App() {
   const [replayingIntro, setReplayingIntro] = useState(false);
   const [paywall, setPaywall] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const { pro, ready: entitlementsRead, purchase, restore } = useEntitlements();
+  // The website's sign-in and shop: inert in the phone app; on the web, off
+  // unless the site's api/ says otherwise (src/lib/useAccount.ts).
+  const account = useAccount();
+  const { pro, ready: entitlementsRead, purchase, restore } = useEntitlements(account);
 
   // Nothing is rendered until both the settings (which carry the onboarding
-  // flag) and the stored entitlement have been read. `pro` starts false, so
-  // rendering earlier shows a paying customer the free build for a frame — the
-  // guide visibly loses its Pro construction lines and then gains them back,
-  // and the home screen offers to sell them something they already own.
+  // flag) and the stored entitlement have been read — on a website that sells
+  // Pro, until its api/ has said who is signed in and what they own. `pro`
+  // starts false, so rendering earlier shows a paying customer the free build
+  // for a frame — the guide visibly loses its Pro construction lines and then
+  // gains them back, and the home screen offers to sell them something they
+  // already own.
   useEffect(() => {
     loadSettings().then(setSettings);
   }, []);
@@ -67,6 +74,9 @@ export default function App() {
     <SafeAreaProvider>
       <SafeAreaView style={styles.root}>
         <StatusBar style="dark" />
+        {settings !== null && entitlementsRead && (
+          <AccountNotice notice={account.notice} onDismiss={account.dismissNotice} />
+        )}
         {settings === null || !entitlementsRead ? null : !settings.seenIntro || replayingIntro ? (
           <OnboardingScreen onDone={finishOnboarding} />
         ) : project ? (
@@ -98,6 +108,7 @@ export default function App() {
                 onChange={updateSettings}
                 onReset={() => updateSettings(resetSettings(settings))}
                 onClose={() => setSettingsOpen(false)}
+                account={account}
               />
             </SafeAreaView>
           </Modal>
@@ -109,6 +120,7 @@ export default function App() {
               onClose={() => setPaywall(false)}
               onPurchase={purchase}
               onRestore={restore}
+              account={account}
             />
           </SafeAreaView>
         </Modal>

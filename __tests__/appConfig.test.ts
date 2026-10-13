@@ -27,6 +27,10 @@ import zlib from 'zlib';
 import type { ExportedConfig } from 'expo/config-plugins';
 
 import plugin, { addInternetPermission, DEBUG_MANIFEST, writeDebugManifest } from '../plugins/withDebugInternet';
+import { NO_LANDING } from '../src/lib/account';
+// Resolved as an iOS build resolves it (jest-expo's platform), so this is the
+// module a native bundle carries in place of accountClient.web.ts.
+import { accountClient } from '../src/lib/accountClient';
 
 /** An element of a manifest or resource file as the config plugins parse it: attributes under `$`. */
 interface XmlElement {
@@ -98,28 +102,45 @@ const manifestsUnder = (dir: string): string[] => {
 };
 
 /**
- * Every source file the app ships, as one string: `src/` less its tests, plus
- * the entry points. What the config asks for is justified against this
- * rather than assumed.
+ * The website's account client: the one module of the app that makes a
+ * request, to the site's own api/. Metro bundles a `.web.ts` module into the
+ * web build alone, so no native build carries it; its twin,
+ * src/lib/accountClient.ts, is what iOS and Android get, and is held inert
+ * below.
  */
-function appSource(): string {
-  const sources: string[] = [];
+const WEB_ONLY = ['src/lib/accountClient.web.ts'];
+
+/** Every source file the app ships, by its path from the root: `src/` less its tests, and the entry points. */
+function appFiles(): string[] {
+  const files: string[] = [];
   const walk = (dir: string) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         if (entry.name !== '__tests__') walk(full);
       } else if (/\.[jt]sx?$/.test(entry.name)) {
-        sources.push(fs.readFileSync(full, 'utf8'));
+        files.push(path.relative(root, full).split(path.sep).join('/'));
       }
     }
   };
   walk(path.join(root, 'src'));
-  for (const entry of ['App.tsx', 'index.ts']) {
-    sources.push(fs.readFileSync(path.join(root, entry), 'utf8'));
-  }
-  return sources.join('\n');
+  return [...files, 'App.tsx', 'index.ts'];
 }
+
+/**
+ * Every source file a native build ships, as one string: appFiles() less the
+ * web-only client. What the config asks for is justified against this rather
+ * than assumed.
+ */
+function appSource(): string {
+  return appFiles()
+    .filter((file) => !WEB_ONLY.includes(file))
+    .map((file) => fs.readFileSync(path.join(root, file), 'utf8'))
+    .join('\n');
+}
+
+/** The APIs that open a socket, or hand a URL to something that does. */
+const NETWORK = /\bfetch\s*\(|XMLHttpRequest|WebSocket|\baxios\b|openBrowserAsync|expo-updates/;
 
 /**
  * A PNG as tools/png.mjs writes them: 8-bit RGBA, no filtering. Enough to
@@ -260,9 +281,7 @@ describe('what leaves the device', () => {
     // rather than remembered: these are the APIs that open a socket, or hand
     // a URL to something that does. Adding one means the shipped build needs
     // the permission back, and the privacy argument above is over.
-    expect(appSource()).not.toMatch(
-      /\bfetch\s*\(|XMLHttpRequest|WebSocket|\baxios\b|openBrowserAsync|expo-updates/
-    );
+    expect(appSource()).not.toMatch(NETWORK);
     // The one URL the app hands out is the About row's source link, which
     // `Linking.openURL` passes to the operating system: the browser fetches
     // it in its own process under its own permissions, and this app still
@@ -278,6 +297,48 @@ describe('what leaves the device', () => {
     // no scheme is registered either: a scheme is an entry point other apps
     // can open.
     expect(appConfig.scheme).toBeUndefined();
+  });
+
+  it('makes a request only from the web build, and only from the account client', () => {
+    // The website's sign-in and shop talk to the site's own api/; the scan
+    // above exempts that one module and nothing else, so a request anywhere
+    // else in the app still fails it. Metro picks a `.web.ts` module for the
+    // web build alone: the twin beside it is what a phone app is built from.
+    const reaching = appFiles().filter((file) => NETWORK.test(fs.readFileSync(path.join(root, file), 'utf8')));
+    expect(reaching).toEqual(WEB_ONLY);
+    for (const file of WEB_ONLY) {
+      const twin = file.replace(/\.web\.ts$/, '.ts');
+      expect(twin).not.toBe(file);
+      expect(fs.existsSync(path.join(root, twin))).toBe(true);
+    }
+    // Nothing imports the web client by its own name, which would bundle it
+    // into a phone app as well.
+    const named = appFiles().filter((file) => /from '[^']*accountClient\.web'/.test(fs.readFileSync(path.join(root, file), 'utf8')));
+    expect(named).toEqual([]);
+  });
+
+  it('builds the phone app with the inert twin: not configured, and opening nothing', async () => {
+    const reached = jest.fn(async () => {
+      throw new Error('the native twin reached for the network');
+    });
+    const realFetch = global.fetch;
+    global.fetch = reached;
+    try {
+      expect(accountClient.web).toBe(false);
+      await expect(accountClient.config()).resolves.toBeNull();
+      await expect(accountClient.me()).resolves.toBeNull();
+      await expect(accountClient.signOut()).resolves.toBe(false);
+      await expect(accountClient.deleteAccount()).resolves.toBe(false);
+      await expect(accountClient.checkout('pro')).resolves.toBe('unavailable');
+      expect(accountClient.signIn()).toBeUndefined();
+      expect(accountClient.takeLanding()).toBe(NO_LANDING);
+      expect(reached).not.toHaveBeenCalled();
+    } finally {
+      global.fetch = realFetch;
+    }
+    const twin = fs.readFileSync(path.join(root, 'src/lib/accountClient.ts'), 'utf8');
+    expect(twin).not.toMatch(NETWORK);
+    expect(twin).not.toMatch(/https?:|location|api\//);
   });
 
   it('gives a development build the network back, in the debug source set only', async () => {

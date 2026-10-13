@@ -13,15 +13,22 @@
 #                       no 'unsafe-inline'.
 #   img-src 'self' blob:  the favicon; the portrait, which the browser's file picker hands over as
 #                       a blob: URL; and the guide redrawn for an export (src/lib/webExport.ts).
-#   connect-src 'none'  the app opens no connection of any kind.
+#   connect-src 'self'  the site's own api/ and nothing else: server/kit, sign in with Google and the
+#                       shop, off until its variables are set (functions/api/[[path]].js on
+#                       Cloudflare Pages, server/start.mjs behind nginx). The page asks GET api/config
+#                       once on load (a 404 where no API runs, and then nothing more), then api/me,
+#                       checkout, logout and DELETE me. With 'none' that first request is refused.
+#                       Google and Stripe are top-level navigations, which CSP does not govern: no
+#                       script, frame, font or image of theirs is loaded.
 #   frame-ancestors 'none' with X-Frame-Options: DENY: the app is not meant to be embedded.
 #   require-trusted-types-for 'script'; trusted-types 'none': no string reaches an HTML or script
 #                       sink; react-native-web and React run under it.
 # Everything else (fonts, media, workers, frames, the manifest) falls to default-src 'none'.
 #
-# Referrer-Policy is no-referrer: the site makes no cross-origin request, and the one outbound
-# link (the source code) gains nothing from one. Permissions-Policy denies every powerful feature,
-# none of which the app uses: "Take a photo" is the file picker's own capture, not getUserMedia.
+# Referrer-Policy is no-referrer: the site makes no cross-origin request, and nothing it leaves for
+# (the source code, Google's sign-in, Stripe's Checkout) gains anything from one.
+# Permissions-Policy denies every powerful feature, none of which the app uses: "Take a photo" is
+# the file picker's own capture, not getUserMedia, and Checkout is Stripe's own page, not payment=.
 # Every name is one Chromium 141 recognises (an unknown one is a console warning), except
 # web-share, which it recognises only on platforms where it can share.
 #
@@ -29,7 +36,7 @@
 # (--base-url) is for GitHub Pages, which reads none of them.
 
 /*
-  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; img-src 'self' blob:; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
+  Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer

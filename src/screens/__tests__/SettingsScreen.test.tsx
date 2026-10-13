@@ -4,13 +4,14 @@
  * URL the app hands out, and every control has a name a screen reader can say.
  */
 jest.mock('expo-constants', () => ({ __esModule: true, default: { expoConfig: { version: '1.2.3' } } }));
-jest.mock('../../lib/confirm', () => ({ confirmAction: jest.fn() }));
+jest.mock('../../lib/confirm', () => ({ confirmAction: jest.fn(), notify: jest.fn() }));
 
 import React from 'react';
 import renderer, { act, type ReactTestRenderer } from 'react-test-renderer';
 import { Linking, Platform, Switch, Text } from 'react-native';
 
-import { confirmAction } from '../../lib/confirm';
+import { ACCOUNT_OFF, type AccountState } from '../../lib/account';
+import { confirmAction, notify } from '../../lib/confirm';
 import { DEFAULTS } from '../../lib/settings';
 import SettingsScreen, { APP_VERSION, SOURCE_URL, type SettingsScreenProps } from '../SettingsScreen';
 
@@ -130,5 +131,96 @@ describe('the Vibration row in a browser', () => {
     const toggle = root().findByType(Switch);
     expect(toggle.props.disabled).toBe(false);
     expect(toggle.props.value).toBe(true);
+  });
+});
+
+describe('the Account section, on a website that offers sign-in', () => {
+  const realOS = Platform.OS;
+  afterEach(() => {
+    Platform.OS = realOS;
+  });
+
+  /** An account as useAccount builds it, with every action recorded. */
+  const account = (over: Partial<AccountState> = {}): AccountState => ({
+    ...ACCOUNT_OFF,
+    signInOn: true,
+    signIn: jest.fn(),
+    signOut: jest.fn(async () => null),
+    deleteAccount: jest.fn(async () => null),
+    buyPro: jest.fn(async () => null),
+    ...over,
+  });
+  const texts = () => root().findAllByType(Text).map((t) => [].concat(t.props.children).join(''));
+
+  it('is not drawn in the phone app, or on a site with no account', async () => {
+    await mount(props());
+    expect(texts()).not.toContain('Account');
+    expect(texts()).not.toContain('Sign in with Google');
+    await mount({ ...props(), account: ACCOUNT_OFF });
+    expect(texts()).not.toContain('Sign in with Google');
+  });
+
+  it('offers to sign in when no one is', async () => {
+    const a = account();
+    await mount({ ...props(), account: a });
+    expect(texts()).toContain('Account');
+    expect(texts()).not.toContain('Sign out');
+    await pressByText('Sign in with Google');
+    expect(a.signIn).toHaveBeenCalledTimes(1);
+  });
+
+  it('names who is signed in, and signs them out', async () => {
+    const a = account({ user: { email: 'ada@example.com' } });
+    await mount({ ...props(), account: a });
+    expect(texts()).toContain('Signed in as ada@example.com');
+    expect(texts()).not.toContain('Sign in with Google');
+    await pressByText('Sign out');
+    expect(a.signOut).toHaveBeenCalledTimes(1);
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it('says "Signed in with Google" when Google gave no verified address', async () => {
+    await mount({ ...props(), account: account({ user: { email: null } }) });
+    expect(texts()).toContain('Signed in with Google');
+  });
+
+  it('says so through the app\'s own message when signing out did not work', async () => {
+    const a = account({ user: { email: null }, signOut: jest.fn(async () => 'Could not sign out. Try again.') });
+    await mount({ ...props(), account: a });
+    await pressByText('Sign out');
+    expect(notify).toHaveBeenCalledWith('Sign out', 'Could not sign out. Try again.');
+  });
+
+  it('asks before deleting the account, says Pro goes with it, and deletes only when told to', async () => {
+    const a = account({ user: { email: 'ada@example.com' } });
+    await mount({ ...props(), account: a });
+    await pressByText('Delete account');
+    expect(confirmAction).toHaveBeenCalledTimes(1);
+    const ask = jest.mocked(confirmAction).mock.calls[0]![0]; // called once, above
+    expect(ask.title).toBe('Delete account?');
+    expect(ask.message).toMatch(/Pro/);
+    expect(ask.message).toMatch(/payment itself stays with Stripe/);
+    expect(ask.confirmLabel).toBe('Delete account');
+    expect(ask.cancelLabel).toBe('Keep my account');
+    expect(a.deleteAccount).not.toHaveBeenCalled();
+    await act(async () => ask.onConfirm());
+    expect(a.deleteAccount).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives each of its controls a role', async () => {
+    await mount({ ...props(), account: account({ user: { email: 'ada@example.com' } }) });
+    const pressables = root().findAll((n) => n.props && typeof n.props.onPress === 'function' && typeof n.type !== 'string');
+    for (const node of pressables) expect(node.props.accessibilityRole).toMatch(/^(button|link)$/);
+  });
+
+  it('says what leaves the device, exactly, for each build', async () => {
+    Platform.OS = 'ios';
+    await mount({ ...props(), account: account() });
+    expect(texts()).toContain('Nothing leaves your device: the app has no network access.');
+    Platform.OS = 'web';
+    await mount(props());
+    expect(texts()).toContain('Nothing leaves your device: the page sends nothing of yours, and your portraits are never uploaded.');
+    await mount({ ...props(), account: account() });
+    expect(texts().some((t) => t.startsWith('Nothing leaves your device unless you sign in or buy.'))).toBe(true);
   });
 });

@@ -26,7 +26,10 @@ layer: the response headers and rules in `public/_headers`, `public/.htaccess`
 and `deploy/nginx.conf`, the policy the pages carry, and `public/guard.js`. A
 way to run script or load anything the Content-Security-Policy should refuse,
 to make the page reach another origin, or to have a host serve a file that is
-not part of the site, is in scope.
+not part of the site, is in scope. So is the website's API (`server/`,
+`functions/`): sign in with Google, the shop and Stripe's webhook, from
+`server/kit/`. A finding in the kit itself is fixed in its canonical copy and
+copied to every repository that carries it, not patched here.
 
 Out of scope: vulnerabilities in third-party dependencies that are already
 public and have an upstream fix, findings that require an attacker to already
@@ -36,11 +39,17 @@ demonstrated impact.
 ## The website
 
 The website runs the app in the visitor's browser: the portrait is read there
-and never uploaded, and the page opens no connection of its own
-(`connect-src 'none'`). What it keeps is the settings and the Pro flag, in the
+and never uploaded, and the page connects to nothing but its own site's `api/`
+(`connect-src 'self'`). What it keeps is the settings and the Pro flag, in the
 browser's storage for the site's origin. On the web that flag is a record the
-visitor can edit; this build sells nothing, so nothing depends on it, and a
-store wired up on the web would need a server to check purchases. A site
+visitor can edit. Where the site's API sells Pro, Pro is what `api/me` reports
+for the signed-in visitor, granted only by Stripe's signed webhook, and the flag
+is not read for it; where it does not, nothing is sold and nothing depends on
+the flag. Either way Pro unlocks drawing aids in a page the visitor runs, so
+someone who edits the page can turn them on without paying: that is not a
+vulnerability, and the server's record of a purchase is what a sale is. A site
 published as a GitHub Pages project site shares its origin, and so its storage,
 with every other site the account publishes; README.md, "Deploy", recommends a
-domain of its own.
+domain of its own, and the API's sign-in cookie makes that a requirement for a
+site that runs it (`server/kit/README.md`, "One origin per app is a security
+boundary").

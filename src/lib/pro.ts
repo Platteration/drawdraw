@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { ACCOUNT_OFF, PRO_ENTITLEMENT, type AccountState } from './account';
 import { purchases, type PurchaseResult } from './purchases';
 import { cleanEntitlements, KEYS, type Entitlements } from './settings';
 
@@ -50,6 +51,13 @@ async function write(entitlements: Entitlements): Promise<void> {
  * false and the stored entitlement only arrives a tick later, so anything
  * that gates on `pro` has to wait for this or it shows a paying customer the
  * free build for a frame.
+ *
+ * On a website whose api/ sells Pro (`account.shop`, from useAccount.ts), Pro
+ * is what `GET api/me` reports and nothing else: the server's record of a paid
+ * Checkout is the purchase, and the flag in this browser's storage is not read
+ * for it (it is left where it is). `ready` then also waits for the account to
+ * settle. Everywhere else (the phone app, and a website with no shop) the
+ * stored flag is Pro, as it always was.
  */
 export interface EntitlementState {
   pro: boolean;
@@ -58,7 +66,7 @@ export interface EntitlementState {
   restore: () => Promise<PurchaseResult | null | undefined>;
 }
 
-export function useEntitlements(): EntitlementState {
+export function useEntitlements(account: AccountState = ACCOUNT_OFF): EntitlementState {
   const [pro, setPro] = useState(false);
   const [ready, setReady] = useState(false);
 
@@ -95,5 +103,10 @@ export function useEntitlements(): EntitlementState {
     return result;
   }, [grant]);
 
-  return { pro, ready, purchase, restore };
+  return {
+    pro: account.shop ? account.entitlements.includes(PRO_ENTITLEMENT) : pro,
+    ready: ready && account.settled,
+    purchase,
+    restore,
+  };
 }

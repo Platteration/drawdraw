@@ -9,9 +9,10 @@
 // --output-dir  where the site is written (default .web-build): a folder inside the project that
 //               is absent, empty or an earlier build, because it is emptied first.
 // --host        netlify, cloudflare, apache, nginx or github-pages: keep only the config file
-//               that host reads (_headers and _redirects for Netlify and Cloudflare Pages,
-//               .htaccess for Apache, none for nginx, whose config is deploy/nginx.conf, or for
-//               GitHub Pages, which reads none), so no host serves another's config as a file;
+//               that host reads (_headers and _redirects for Netlify, those and _routes.json for
+//               Cloudflare Pages, .htaccess for Apache, none for nginx, whose config is
+//               deploy/nginx.conf, or for GitHub Pages, which reads none), so no host serves
+//               another's config as a file;
 //               for GitHub Pages also write .nojekyll, without which a branch deploy runs Jekyll,
 //               which drops every path that starts with _ (the bundle is under _expo/). Without
 //               --host all three configs stay, and each host ignores the others'.
@@ -25,6 +26,9 @@
 //    the base path: index.html's own (the stylesheet, the safety net) and 404.html's, which is
 //    served at whatever depth the missing address had;
 //  - removes metadata.json, which the export writes for EAS Update and no page loads;
+//  - writes _routes.json, which tells Cloudflare Pages to run the site's API
+//    (functions/api/[[path]].js, server/kit) for <base>/api/* alone and serve every other path
+//    as a file, without invoking a function;
 //  - and refuses a site in which a page names a file the site does not hold.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -110,15 +114,26 @@ export function pageReferences(html, base) {
   return refs;
 }
 
+/**
+ * Cloudflare Pages' routing file for the site's API: Functions run for `<base>/api/*` and for
+ * nothing else, so every other path is served as a file without invoking one. The entry is
+ * functions/api/[[path]].js (server/kit with server/catalogue.js); with none of the kit's
+ * variables set it answers `api/config` with nothing on, and the page draws no sign-in and no
+ * shop.
+ */
+export function routesJson(baseUrl) {
+  return `${JSON.stringify({ version: 1, include: [`${baseUrl}/api/*`], exclude: [] })}\n`;
+}
+
 /** The config files each host reads from the published folder. */
 export const HOST_CONFIGS = {
   netlify: ['_headers', '_redirects'],
-  cloudflare: ['_headers', '_redirects'],
+  cloudflare: ['_headers', '_redirects', '_routes.json'],
   apache: ['.htaccess'],
   nginx: [],
   'github-pages': [],
 };
-const CONFIGS = ['_headers', '_redirects', '.htaccess'];
+const CONFIGS = ['_headers', '_redirects', '.htaccess', '_routes.json'];
 
 /** Leave in the site at `out` only the config files `host` reads, and what else it needs. */
 export function finishForHost(out, host) {
@@ -199,6 +214,7 @@ export function build({ baseUrl, outputDir, host = null }) {
     fs.readFileSync(htaccess, 'utf8').replace(/^(ErrorDocument \d{3} )\/404\.html$/gm, `$1${baseUrl}/404.html`)
   );
   fs.rmSync(path.join(out, 'metadata.json'), { force: true });
+  fs.writeFileSync(path.join(out, '_routes.json'), routesJson(baseUrl));
 
   const missing = [];
   for (const page of pages) {

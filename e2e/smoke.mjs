@@ -16,6 +16,16 @@
  * not serve. e2e/hosts.mjs then serves the same build from a real nginx and
  * Apache.
  *
+ * That host runs no API, as GitHub Pages and Netlify run none: the page asks
+ * api/config once per load, is answered with the 404 page, and draws no
+ * sign-in and no shop. Then the same build is served with the site's API
+ * beside it (server/kit with server/catalogue.js, as Cloudflare Pages runs
+ * functions/api/[[path]].js), its Google and Stripe the fakes of
+ * server/fakes.mjs handed to the kit as its `fetch`, and the whole flow is
+ * played under the site's policy: sign in with Google, buy Pro through
+ * Checkout, Stripe's signed webhook, Pro drawn in the editor, sign out, sign
+ * in again, delete the account, a refused sign-in and a cancelled Checkout.
+ *
  *   npm run test:e2e
  */
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -26,6 +36,10 @@ import { fileURLToPath } from 'node:url';
 
 import { chromium } from 'playwright';
 
+import catalogue from '../server/catalogue.js';
+import { createFakes, envFor, signedDelivery } from '../server/fakes.mjs';
+import { createNodeHandler } from '../server/kit/node.js';
+import { createMemoryStore } from '../server/kit/store.js';
 import { headersFor, startHost } from './host.mjs';
 import { PORTRAIT, writePortrait } from './portrait.mjs';
 
@@ -108,8 +122,16 @@ const browser = await chromium.launch({ executablePath: findChromium() });
  * policy violation (reported in the page, and in the console, where a
  * Trusted Types refusal inside a frame the page made also lands), a page
  * error, a console error, and a request for anything outside the site.
+ *
+ * `on` is the site the page is served from. `leaves` are the outside
+ * addresses the page may navigate to, each answered by page.route in the
+ * browser and never sent (Google's authorize page and Stripe's Checkout);
+ * those navigations are kept in `left`. The one console error excused is
+ * Chromium's line for the page's own api/config when it is a 404, as it is on
+ * every host that runs no API: matched by the address it is reported at, not
+ * by its words, and counted in `probes`.
  */
-async function sitePage(options = {}) {
+async function sitePage(options = {}, { on = site, leaves = [] } = {}) {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
@@ -118,6 +140,8 @@ async function sitePage(options = {}) {
   });
   const page = await context.newPage();
   const problems = [];
+  const probes = [];
+  const left = [];
   await page.exposeBinding('__reportViolation', (_source, text) => problems.push(`violation: ${text}`));
   await page.addInitScript(() => {
     document.addEventListener(
@@ -128,18 +152,24 @@ async function sitePage(options = {}) {
   });
   page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
   page.on('console', (m) => {
+    if (m.type() === 'error' && m.location().url === `${on}api/config` && /status of 404/.test(m.text())) {
+      probes.push(m.text());
+      return;
+    }
     if (m.type() === 'error' || /Content Security Policy|Trusted ?(Type|HTML|Script)/i.test(m.text())) {
       problems.push(`console.${m.type()}: ${m.text().slice(0, 200)} (${m.location().url})`);
     }
   });
   page.on('request', (r) => {
     const url = r.url();
-    if (!url.startsWith(site) && !url.startsWith('blob:') && !url.startsWith('data:')) problems.push(`request outside the site: ${url}`);
+    if (url.startsWith(on) || url.startsWith('blob:') || url.startsWith('data:')) return;
+    if (r.isNavigationRequest() && leaves.some((prefix) => url.startsWith(prefix))) left.push(url);
+    else problems.push(`request outside the site: ${url}`);
   });
-  return { context, page, problems };
+  return { context, page, problems, probes, left };
 }
 
-const { context, page, problems } = await sitePage();
+const { context, page, problems, probes } = await sitePage();
 const dialogs = [];
 page.on('dialog', async (dialog) => {
   dialogs.push(dialog.message());
@@ -342,10 +372,235 @@ async function walkThrough() {
   check('the Vibration switch is disabled in a browser', await page.getByRole('switch', { name: 'Vibration' }).isDisabled());
   const version = JSON.parse(readFileSync(join(root, 'app.json'), 'utf8')).expo.version;
   check('about carries the version from app.json', settings.includes(`DrawDraw ${version}`), `wanted ${version}`);
-  check('about says what stays on the device', settings.includes('Nothing leaves your device'));
+  check('about says what stays on the device', settings.includes('Nothing leaves your device: the page sends nothing of yours'));
+  // GitHub Pages and Netlify run nothing: api/config is the 404 page, and the account and the
+  // shop do not exist. The page asked once per load and nothing after the 404.
+  check('with no API on the host, Settings draws no account', !settings.includes('Sign in with Google') && !/\bACCOUNT\b/i.test(settings));
+  const asked = host.served.filter((s) => s.path.startsWith('/api/'));
+  check(
+    'with no API on the host, the page asked for api/config once per load, and nothing more',
+    asked.length === 2 && asked.every((s) => s.path === '/api/config' && s.status === 404) && probes.length === 2,
+    JSON.stringify(asked)
+  );
   dialogs.length = 0;
   await tap('Reset to defaults');
   check('reset asks first, through the browser dialog', dialogs.length === 1 && dialogs[0].startsWith('Reset settings?'), dialogs.join(' | ') || 'no dialog');
+}
+
+/** The headers server/kit sends on every answer of its own (server/kit/http.js). */
+const API_HEADERS = {
+  'x-content-type-options': 'nosniff',
+  'content-security-policy': "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+  'referrer-policy': 'no-referrer',
+  'cross-origin-resource-policy': 'same-origin',
+};
+
+/**
+ * The website with its API beside it, as Cloudflare Pages serves functions/api/[[path]].js: the
+ * real build under `_headers`, server/kit with this app's catalogue answering <base>/api/*, and
+ * APP_URL this host's own address, as on a deployment. Google and Stripe are the fakes of
+ * server/fakes.mjs, handed to the kit as its fetch; in the browser, page.route answers Google's
+ * authorize page and Stripe's Checkout, and nothing reaches either.
+ */
+async function withApi() {
+  const fakes = await createFakes();
+  let handler = null;
+  const shop = await startHost({ dir: BUILD, base: BASE, api: (req, res) => handler(req, res) });
+  const logs = [];
+  handler = createNodeHandler({
+    catalogue,
+    env: envFor(shop.site),
+    store: createMemoryStore(),
+    fetch: fakes.fetch,
+    log: (level, message) => logs.push(`${level}: ${message}`),
+  });
+  check('the API beside the site has sign-in and the shop on', handler.features.signIn && handler.features.shop);
+  const GOOGLE = 'https://accounts.google.com/o/oauth2/v2/auth?';
+  const CHECKOUT = 'https://checkout.stripe.com/c/pay/';
+  const visitor = await sitePage({}, { on: shop.site, leaves: [GOOGLE, CHECKOUT] });
+  const p = visitor.page;
+  const dialogs = [];
+  p.on('dialog', async (dialog) => {
+    dialogs.push(dialog.message());
+    await dialog.accept();
+  });
+  // The API's own answers carry its headers, not _headers': Pages applies neither to a Function.
+  const apiHeaders = [];
+  p.on('response', (r) => {
+    if (!r.url().startsWith(`${shop.site}api/`)) return;
+    const got = r.headers();
+    for (const [name, value] of Object.entries(API_HEADERS)) if (got[name] !== value) apiHeaders.push(`${r.url()} ${name}: ${got[name]}`);
+  });
+  // Pro bought nowhere, planted in this browser's storage as anything on the origin could: while
+  // the site sells Pro it is what api/me says, and this unlocks nothing.
+  await p.addInitScript(() => {
+    localStorage.setItem('drawdraw.settings.v1', JSON.stringify({ seenIntro: true }));
+    localStorage.setItem('drawdraw.entitlements.v1', JSON.stringify({ pro: true }));
+  });
+
+  // Google's side. Playwright routes no redirect's target: measured, neither page.route nor
+  // context.route sees the browser follow the kit's 302 to accounts.google.com (nor one that
+  // route.fulfill hands it), and the browser goes to Google for real. So the kit's own answer to
+  // api/auth/google/start, its sign-in cookie included, reaches the browser as a Refresh to the
+  // same address: the browser then navigates to Google's authorize URL itself, and the route
+  // below answers it as Google does, with a 302 to the callback (fakes.consent checks the URL as
+  // Google would), or with Google's error=access_denied when refusing. The callback arrives from
+  // that cross-site hop, as it does from Google, so the cookie's SameSite is what a real sign-in meets.
+  const answered = [];
+  const startProblems = [];
+  let refuse = false;
+  await p.route(`${shop.site}api/auth/google/start?*`, async (route) => {
+    const response = await route.fetch({ maxRedirects: 0 });
+    const { location = '', ...headers } = response.headers();
+    if (response.status() !== 302 || !location.startsWith(GOOGLE)) startProblems.push(`${response.status()} ${location}`);
+    await route.fulfill({ status: 200, headers: { ...headers, refresh: `0;url=${location}` }, body: '' });
+  });
+  await p.route('https://accounts.google.com/**', async (route) => {
+    const url = route.request().url();
+    answered.push(url);
+    let back;
+    if (refuse) {
+      const asked = new URL(url).searchParams;
+      back = new URL(asked.get('redirect_uri'));
+      back.searchParams.set('error', 'access_denied');
+      back.searchParams.set('state', asked.get('state'));
+    } else {
+      back = fakes.consent(url, { sub: '1001', email: 'ada@example.com' });
+    }
+    await route.fulfill({ status: 302, headers: { location: back.href } });
+  });
+  // Stripe's side: Checkout, paid at once, sends the visitor back to the success_url.
+  const checkouts = [];
+  await p.route('https://checkout.stripe.com/**', (route) => {
+    const url = route.request().url();
+    answered.push(url);
+    checkouts.push(url);
+    return route.fulfill({ status: 302, headers: { location: `${shop.site}?purchase=success` } });
+  });
+
+  const visible = (text, exact = true) => p.getByText(text, { exact }).filter({ visible: true }).first();
+  const press = async (text, exact = true) => {
+    await visible(text, exact).click({ timeout: 10000 });
+    await p.waitForTimeout(300);
+  };
+  const shows = (text, exact = true) => visible(text, exact).waitFor({ timeout: 20000 }).then(() => true, () => false);
+  const home = () => visible('Choose a portrait').waitFor({ timeout: 15000 });
+  const footerOffersPro = async () => (await p.getByText('Unlock Pro', { exact: true }).filter({ visible: true }).count()) === 1;
+  const settingsText = async () => {
+    await press('Settings');
+    await shows('Reset to defaults');
+    const text = await p.locator('body').innerText();
+    await press('Close');
+    return text;
+  };
+  /** Waits for a press to leave the page and for the page it comes back to, at `back`, to draw. */
+  const leaveAndReturn = async (text, through, back = shop.site) => {
+    const left = p.waitForRequest((r) => r.url().startsWith(through), { timeout: 15000 });
+    const returned = p.waitForRequest((r) => r.url() === back && r.isNavigationRequest(), { timeout: 15000 });
+    await press(text);
+    await left;
+    await returned;
+    await p.waitForLoadState('load');
+  };
+  const signIn = async (from = 'Sign in with Google') => {
+    if (from === 'Sign in with Google') await press('Settings');
+    await leaveAndReturn(from, `${shop.site}api/auth/google/callback`);
+    await home();
+  };
+
+  try {
+    await p.goto(shop.site, { waitUntil: 'networkidle' });
+    await home();
+    check('with the shop on, a Pro flag in this browser\'s storage unlocks nothing', await footerOffersPro());
+    const signedOut = await settingsText();
+    check('Settings offers Sign in with Google', /\bACCOUNT\b/i.test(signedOut) && signedOut.includes('Sign in with Google'));
+    check('about says what signing in and buying tell the site', signedOut.includes('Nothing leaves your device unless you sign in or buy.'));
+
+    await press('Unlock Pro');
+    check('the paywall sells Pro at the price Stripe states', await shows('$7.99'));
+    check('and asks a signed-out visitor to sign in to buy, with no Restore', (await shows('Sign in to buy')) && (await p.getByText('Restore purchase').count()) === 0);
+    await signIn('Sign in to buy');
+    check('signing in comes back to the page', new URL(p.url()).pathname === `${BASE}/`, p.url());
+    check('Settings names who is signed in', (await settingsText()).includes('Signed in as ada@example.com'));
+    check('signed in, nothing is owned yet', await footerOffersPro());
+
+    await press('Unlock Pro');
+    await leaveAndReturn('Buy', CHECKOUT, `${shop.site}?purchase=success`);
+    await home();
+    check('Buy left for Stripe\'s Checkout once, and Checkout sent the visitor back', checkouts.length === 1 && new URL(p.url()).search === '', `${checkouts.length} ${p.url()}`);
+    // Back from Checkout nothing is granted yet: only Stripe's signed word grants it.
+    check('coming back from Checkout grants nothing by itself', await footerOffersPro());
+    const delivery = signedDelivery(fakes.paid(checkouts[0]));
+    const hook = await fetch(`${shop.site}api/webhooks/stripe`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'stripe-signature': delivery.signature },
+      body: delivery.body,
+    });
+    check('Stripe\'s signed webhook is taken', hook.status === 200, String(hook.status));
+    check('the page asks api/me until Pro shows, then says thank you', await shows('Thank you — DrawDraw Pro is unlocked.'));
+    check('and Pro is no longer offered', !(await footerOffersPro()));
+    await press('Dismiss');
+
+    // Pro drawn: the editor's Pro construction lines are no longer locked.
+    const chooser = p.waitForEvent('filechooser');
+    await press('Choose a portrait');
+    await (await chooser).setFiles(portraitPath);
+    await shows('Fit to face');
+    await press('Build');
+    check('the editor draws Pro\'s construction lines unlocked', (await shows('Jaw')) && (await p.getByText('Jaw ✦').count()) === 0);
+    await press('‹ Portraits');
+    await home();
+
+    await press('Settings');
+    await press('Sign out');
+    check('signing out offers Sign in with Google again', await shows('Sign in with Google'));
+    await press('Close');
+    check('and Pro goes with the account', await footerOffersPro());
+
+    await signIn();
+    check('the purchase is the account\'s: signing in again brings Pro back', !(await footerOffersPro()));
+
+    await press('Settings');
+    dialogs.length = 0;
+    await press('Delete account');
+    check('deleting the account asks first, and says Pro goes with it', dialogs.length === 1 && dialogs[0].startsWith('Delete account?') && dialogs[0].includes('DrawDraw Pro'), dialogs.join(' | '));
+    check('then signs out', await shows('Sign in with Google'));
+    await press('Close');
+    check('and Pro is gone', await footerOffersPro());
+    await signIn();
+    check('signing in again after deleting starts with nothing', await footerOffersPro());
+    check('as the same person, signed in', (await settingsText()).includes('Signed in as ada@example.com'));
+
+    // A sign-in Google refuses comes back to the site, which says so once and cleans the address.
+    await press('Settings');
+    await press('Sign out');
+    await shows('Sign in with Google');
+    refuse = true;
+    await leaveAndReturn('Sign in with Google', `${shop.site}api/auth/google/callback`, `${shop.site}?signin=failed`);
+    check("a refused sign-in says Sign-in didn't complete.", await shows("Sign-in didn't complete."));
+    check('and leaves the address clean', new URL(p.url()).search === '', p.url());
+    await press('Dismiss');
+    await p.goto(`${shop.site}?purchase=cancelled`, { waitUntil: 'networkidle' });
+    await home();
+    check('a cancelled Checkout only cleans the address', new URL(p.url()).search === '' && (await p.getByRole('alert').count()) === 0, p.url());
+  } catch (err) {
+    check('the sign-in and shop walk ran to its end', false, err.message.split('\n')[0]);
+  } finally {
+    await visitor.context.close();
+    await shop.close();
+  }
+
+  // Every page that left the site went to Google's authorize URL or Stripe's Checkout, each
+  // answered in the browser; nothing reached either, and the fakes were asked nothing they do not serve.
+  check('the kit sent the browser to Google\'s authorize URL each time', startProblems.length === 0, startProblems.join(' | '));
+  check(
+    'every page that left the site was answered in the browser: four sign-ins at Google, one Checkout',
+    JSON.stringify(visitor.left) === JSON.stringify(answered) && answered.filter((u) => u.startsWith(GOOGLE)).length === 4 && checkouts.length === 1,
+    `${visitor.left.length} left, ${answered.length} answered`
+  );
+  check('the API answered with its own headers', apiHeaders.length === 0, apiHeaders.slice(0, 3).join(' | '));
+  check('the sign-in and shop walk raised no violation, page or console error, and asked nothing outside the site', visitor.problems.length === 0 && shop.outside.length === 0, [...visitor.problems, ...shop.outside].slice(0, 4).join(' | '));
+  check('the fakes of Google and Stripe were asked nothing they do not serve, and the kit logged nothing', fakes.unexpected.length === 0 && logs.length === 0, [...fakes.unexpected, ...logs].join(' | '));
 }
 
 try {
@@ -372,7 +627,7 @@ try {
 
   // Each config also by other spellings of the same file, which this host served while it
   // refused the configs by name rather than by the file a path resolves to.
-  for (const path of ['_headers', '_redirects', '.htaccess', '/_headers', '/_redirects', '/.htaccess', '%2F.htaccess', 'README.md', 'package.json', 'app.json', '.git/config', 'deploy/nginx.conf', 'src/screens/HomeScreen.tsx', '_expo/']) {
+  for (const path of ['_headers', '_redirects', '.htaccess', '_routes.json', '/_headers', '/_redirects', '/.htaccess', '%2F.htaccess', 'README.md', 'server/catalogue.js', 'functions/api/[[path]].js', 'package.json', 'app.json', '.git/config', 'deploy/nginx.conf', 'src/screens/HomeScreen.tsx', '_expo/']) {
     const status = (await fetch(`${site}${path}`)).status;
     check(`the host does not serve ${path}`, status === 404, String(status));
   }
@@ -495,6 +750,29 @@ try {
   await noScript.page.goto(site, { waitUntil: 'load' });
   check('with JavaScript off the page says it needs it', (await noScript.page.locator('body').innerText()).includes('DrawDraw needs JavaScript'));
   await noScript.context.close();
+
+  // connect-src 'self': the site's own api/ and nothing else. Were the policy to let a request
+  // through, the route below stops it in the browser; what is read is the policy's own refusal.
+  const reach = await sitePage();
+  await reach.page.route('https://example.com/**', (route) => route.abort());
+  await reach.page.goto(site, { waitUntil: 'networkidle' });
+  const reached = await reach.page.evaluate(async () => {
+    try {
+      await fetch('https://example.com/collect');
+      return 'fetched';
+    } catch (e) {
+      return e.name;
+    }
+  });
+  await reach.page.waitForTimeout(500); // the violation event is reported after the fetch rejects
+  // The page enforces the policy twice, as the header and as its <meta>, and each reports.
+  const violations = reach.problems.filter((p) => p.startsWith('violation: connect-src blocked https://example.com/collect '));
+  const aboutIt = reach.problems.filter((p) => p.includes('https://example.com/collect'));
+  check('connect-src lets the page reach no other origin', reached === 'TypeError' && violations.length >= 1, `${reached} ${reach.problems.join(' | ')}`);
+  check('and that refusal is the only thing that page reports', aboutIt.length === reach.problems.length, reach.problems.join(' | '));
+  await reach.context.close();
+
+  await withApi();
 } finally {
   await browser.close();
   await host.close();

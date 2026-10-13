@@ -1,4 +1,6 @@
 # Netlify: what the published folder holds but the site does not serve. Netlify reads _headers and
-# this file and serves neither; .htaccess is Apache's, and `npm run build:web -- --host netlify`
-# leaves it out in the first place. (Cloudflare Pages has no 404 rule: build with --host cloudflare.)
+# this file and serves neither; .htaccess is Apache's and _routes.json Cloudflare Pages', and
+# `npm run build:web -- --host netlify` leaves both out in the first place. (Cloudflare Pages has no
+# 404 rule: build with --host cloudflare.)
 /.htaccess  /404.html  404!
+/_routes.json  /404.html  404!
