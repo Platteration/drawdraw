@@ -1,0 +1,47 @@
+[
+  {
+    "advisory": "GHSA-vfj7-8cjw-p6xm",
+    "package": "braces",
+    "severity": "high",
+    "paths": [
+      "@expo/metro-runtime > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "@react-native-async-storage/async-storage > react-native > @react-native/community-cli-plugin > metro > metro-file-map > micromatch > braces",
+      "expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-constants > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-file-system > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-haptics > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-image-picker > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-media-library > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-sharing > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-splash-screen > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-status-bar > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "expo-system-ui > expo > @expo/cli > @expo/metro-file-map > micromatch > braces",
+      "react-native > @react-native/community-cli-plugin > metro > metro-file-map > micromatch > braces",
+      "react-native-safe-area-context > react-native > @react-native/community-cli-plugin > metro > metro-file-map > micromatch > braces",
+      "react-native-svg > react-native > @react-native/community-cli-plugin > metro > metro-file-map > micromatch > braces",
+      "react-native-view-shot > react-native > @react-native/community-cli-plugin > metro > metro-file-map > micromatch > braces"
+    ],
+    "reason": "Stack exhaustion on deeply nested brace patterns. 3.0.3 is the newest release of braces, so there is no fix to take. It arrives only through micromatch in build and test tooling (Metro's and Expo's file maps, which match the project's own file paths, and Jest's where React Native's optional Jest preset installs it), and is in neither the app bundle nor the website.",
+    "expires": "2027-01-11"
+  },
+  {
+    "advisory": "GHSA-86w9-cpqp-85rv",
+    "package": "node-forge",
+    "severity": "high",
+    "paths": [
+      "@expo/metro-runtime > expo > @expo/cli > node-forge",
+      "expo > @expo/cli > node-forge",
+      "expo-constants > expo > @expo/cli > node-forge",
+      "expo-file-system > expo > @expo/cli > node-forge",
+      "expo-haptics > expo > @expo/cli > node-forge",
+      "expo-image-picker > expo > @expo/cli > node-forge",
+      "expo-media-library > expo > @expo/cli > node-forge",
+      "expo-sharing > expo > @expo/cli > node-forge",
+      "expo-splash-screen > expo > @expo/cli > node-forge",
+      "expo-status-bar > expo > @expo/cli > node-forge",
+      "expo-system-ui > expo > @expo/cli > node-forge"
+    ],
+    "reason": "RSA PKCS#1 v1.5 signature verification accepts extra nested DigestAlgorithm elements. 1.4.0 is the newest release of node-forge, so there is no fix to take. It arrives only through @expo/cli, the development tooling, which uses it for code signing (expo-updates manifests and the signing identities `expo run:ios` reads), and is in neither the app bundle nor the website.",
+    "expires": "2027-01-11"
+  }
+]

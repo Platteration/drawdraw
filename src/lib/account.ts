@@ -313,4 +313,4 @@ export const PRIVACY_NATIVE = 'Nothing leaves your device: the app has no networ
 export const PRIVACY_WEB = 'Nothing leaves your device: the page sends nothing of yours, and your portraits are never uploaded.';
 /** ...and on a website whose api/ offers sign-in. */
 export const PRIVACY_WEB_ACCOUNT =
-  "Nothing leaves your device unless you sign in or buy. Signing in with Google tells this site an account id and your email address; a purchase is paid through Stripe, which handles the payment and is told that account id with it. The site keeps the account id, what was bought and Stripe's customer id, and your email address only while you are signed in. Your portraits are never uploaded.";
+  "Nothing leaves your device unless you sign in or buy. Signing in with Google tells this site an account id and your email address; a purchase is paid through Stripe, which handles the payment and is told that account id with it. The site keeps the account id, what was bought, Stripe's customer id and, for 30 days, the Checkout page it last sent you to, and your email address only while you are signed in. Your portraits are never uploaded.";

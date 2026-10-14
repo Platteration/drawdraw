@@ -168,7 +168,7 @@ the content-hashed bundle under `_expo/static/`, plus the config file for your h
 | Host | Reads | Notes |
 | --- | --- | --- |
 | Netlify, Cloudflare Pages | `_headers`, `_redirects`; Cloudflare Pages also `_routes.json` | Build with `--host netlify` or `--host cloudflare`, which leaves `.htaccess` out (Netlify would refuse it through `_redirects` anyway; Cloudflare Pages has no 404 rule and would serve it as a file). `_routes.json` sends `/api/*`, and nothing else, to the site's API on Cloudflare Pages; `--host netlify` leaves it out, and `_redirects` refuses it. Cloudflare Pages serves a project at the root of its domain, where `functions/api/[[path]].js` answers `/api/*`, so `--host cloudflare` refuses a `--base-url`. |
-| Apache 2.4 | `.htaccess` | Build with `--host apache`. Needs `mod_rewrite` and `mod_headers` (`a2enmod rewrite headers`) and `AllowOverride FileInfo Options`; without either module every request is a 500 and the error log names the directive. Set `ServerTokens Prod` in the server config, which no `.htaccess` can: without it every response names Apache's version and the system's. The site's API needs `ProxyPass "/api/" "http://127.0.0.1:8788/api/"` in the virtual host, with `mod_proxy` and `mod_proxy_http` (`.htaccess` cannot proxy), and beside it `ErrorDocument 502 /404.html`, `ErrorDocument 503 /404.html` and `ErrorDocument 504 /404.html`: while the API is not running Apache answers 503, and with these that is the site's 404 page with every header rather than Apache's own page with none. Under a sub-path, every path in those four lines starts with it, the `ProxyPass` target's included. |
+| Apache 2.4 | `.htaccess` | Build with `--host apache`. Needs `mod_rewrite` and `mod_headers` (`a2enmod rewrite headers`) and `AllowOverride FileInfo Options`; without either module every request is a 500 and the error log names the directive. Set `ServerTokens Prod` in the server config, which no `.htaccess` can: without it every response names Apache's version and the system's. The site's API needs `ProxyPass "/api/" "http://127.0.0.1:8788/api/"` in the virtual host, with `mod_proxy` and `mod_proxy_http` (`ProxyPass` is server configuration; an `.htaccess` could proxy through a `RewriteRule` with `[P]`, but the virtual host is the place for it, as `server/kit/README.md` says), and beside it `ErrorDocument 502 /404.html`, `ErrorDocument 503 /404.html` and `ErrorDocument 504 /404.html`: while the API is not running Apache answers 503, and with these that is the site's 404 page with every header rather than Apache's own page with none. Under a sub-path, every path in those four lines starts with it, the `ProxyPass` target's included. |
 | nginx | `deploy/nginx.conf` | Build with `--host nginx`; copy the config into the server's, set `server_name`, `root` and the certificate paths. Written for a domain root. HTTP/2 is turned on in the `listen` lines, which nginx 1.24 (Ubuntu 24.04's) reads; `http2 on;` would need 1.25.1. `location ^~ /api/` hands the site's API to `server/start.mjs` on `127.0.0.1:8788`; while it is not running nginx answers 502 (504 when it does not answer in time) with the site's 404 page and every header, and the page reads that as no account. |
 | GitHub Pages | nothing | Build with `--host github-pages --base-url /<repo>`, which writes `.nojekyll`: a branch deploy otherwise runs Jekyll, which drops every path starting with `_`, the bundle's `_expo/` among them. Pages sends no headers of the site's choosing: only the `<meta>` policy applies (not `frame-ancestors`, which a `<meta>` cannot carry), and HSTS, nosniff, the framing refusal, the Permissions-Policy and COOP/CORP do not. |
 
@@ -216,7 +216,7 @@ curl -sI https://SITE/ | grep -iE 'content-security|strict-transport|nosniff|x-f
 curl -sI https://SITE/.htaccess | head -1             # 404
 curl -sI https://SITE/_expo/ | head -1                # 404, not a listing
 curl -sI https://SITE/nonexistent | head -1           # 404, the site's own page
-curl -s  https://SITE/.well-known/security.txt        # the contact, and an Expires date in the future
+curl -s  https://SITE/.well-known/security.txt        # the contacts, and an Expires date in the future
 curl -s  https://SITE/api/config                      # with the API: what is on; without it: the 404 page
 ```
 
@@ -263,8 +263,10 @@ since the App Store and Google Play require their own in-app purchase for a digi
   an account id and the email address, and Stripe handles the payment and is told that account
   id with it (as the Checkout's reference and in its metadata, where it stays after the account
   here is deleted; never the email address). The site keeps the
-  account id, what was bought and Stripe's customer id, and the email address only while the
-  visitor is signed in. The About card says so on such a site; the portraits are never uploaded.
+  account id, what was bought, Stripe's customer id and, for 30 days, the Checkout page it last
+  sent the visitor to (so that a second Buy before Stripe's webhook is given the same one), and
+  the email address only while the visitor is signed in. The About card says so on such a
+  site; the portraits are never uploaded.
 - **What it does not protect.** Pro unlocks drawing aids in a page the visitor runs: someone who
   edits the page can turn them on without paying. The server's record of a paid Checkout is what
   a sale is; the unlock in the page is a convenience, not protection.
@@ -287,7 +289,11 @@ two signals the fit reads, and the solver's recovery, noise tolerance and
 refusal of degenerate input. CI lints, type-checks, runs the tests and the conventions test,
 bundles for iOS and Android, checks that `assets/` still matches what the model
 generates, and then runs the browser test of the website; a separate job runs
-`npm audit --omit=dev --audit-level=high` against the lockfile.
+`node .github/audit/npm-audit.mjs`, the shared audit gate: it runs `npm audit --omit=dev`
+against the lockfile and fails on every high or critical advisory but those
+`.github/audit/accepted.json` accepts (braces and node-forge, which reach only the build
+tooling, each along every route it arrives by, with no release to take, until a date at most
+90 days ahead).
 
 Bundling proves the app compiles; `npm run test:e2e` proves the website runs. It
 builds the site for `/drawdraw/`, serves it from a host that sends the headers

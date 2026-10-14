@@ -207,6 +207,9 @@ describe('the words', () => {
     // A Checkout tells Stripe the visitor's account id (server/api.test.mjs reads it off the
     // session the kit asks for), and deleting the account here does not take it back.
     expect(PRIVACY_WEB_ACCOUNT).toContain('Stripe, which handles the payment and is told that account id with it.');
+    // The kit remembers the Checkout Session it last gave the account for a product, 30 days,
+    // so that a second Buy before Stripe's webhook is given the same one (server/kit/README.md).
+    expect(PRIVACY_WEB_ACCOUNT).toContain('for 30 days, the Checkout page it last sent you to');
     expect(ACCOUNT_NOTES.deleteBody).toContain('The payment itself stays with Stripe, with the account id it was made under.');
   });
 

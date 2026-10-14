@@ -448,7 +448,7 @@ async function apacheChecks(apiPort) {
   check('Apache: plain HTTP is redirected to https', redirect.status === 301 && redirect.headers.location === `https://127.0.0.1:${new URL(origin).port}${BASE}/a?x=1`, `${redirect.status} ${redirect.headers.location}`);
   check('Apache under the README\'s `ServerTokens Prod` names no version', redirect.headers.server === 'Apache', redirect.headers.server);
 
-  // .htaccess cannot proxy: the README's ProxyPass goes in the server's own configuration, and
+  // ProxyPass is server configuration: the README's goes in the server's own configuration, and
   // answers api/ before the folder (and so its .htaccess and allow-list) is reached.
   const proxied = await apache('apache-api', ['rewrite', 'headers', 'proxy', 'proxy_http'], apacheApiLines(apiPort));
   await apiChecks(`Apache (${version}) with the README's ProxyPass`, proxied.origin, { 'X-Forwarded-Proto': 'https' });

@@ -101,11 +101,13 @@ also is. Run both (and `npm run check`) before pushing.
   capability. `__tests__/appConfig.test.ts` holds both halves.
 - `server/kit/` — the shared sign-in, shop and webhook kit (sign in with Google,
   Stripe Checkout and its signed webhook), byte for byte the canonical copy every
-  platteration repository carries, at this path. **Never edit it here**: a change is
-  made to the canonical copy and copied everywhere, and `diff -r` against it must be
-  empty. It lints under `eslint.config.js` and type-checks under `tsconfig.json`
-  with no ignore and no setting changed; its own tests are `server/kit/selftest.mjs`,
-  which `npm test` runs. Its `README.md` is the setup guide and the owner's checklist.
+  platteration repository carries, at this path, its `.d.ts` files included. **Never
+  edit it here**: a change is made to the canonical copy and copied everywhere, and
+  `diff -r` against it must be empty; the conventions test holds its 21 files to the
+  canonical copy's hash (`KIT_SHA`). It lints under `eslint.config.js` and type-checks
+  under `tsconfig.json` with no ignore and no setting changed; its own tests are
+  `server/kit/selftest.mjs`, which `npm test` runs. Its `README.md` is the setup guide
+  and the owner's checklist.
 - `server/catalogue.js` (what the website sells: `pro`, one payment, granting `pro`,
   priced by `STRIPE_PRICE_PRO`), `server/start.mjs` (the API on a host of its own,
   loopback, port 8788, records under `KIT_DATA_DIR`), `functions/api/[[path]].js`
@@ -129,7 +131,11 @@ also is. Run both (and `npm run check`) before pushing.
   poll asked before that is not applied after it. `useEntitlements(account)` in
   `pro.ts` takes Pro from `api/me` once `api/config` has said the site sells it, and
   from the stored flag otherwise (a site without a shop, or whose `api/config` has not
-  answered), and is not `ready` until the account has settled. `appConfig.test.ts`'s
+  answered), and is not `ready` until the account has settled. The paywall sends one
+  Buy at a time (drawn disabled while a press is out, as the kit's "For the page" asks:
+  a press that meets another still making its Checkout is answered 502), reads every
+  409 (`already_owned`, `payment_pending`, `subscription_active`) as owned and asks
+  `api/me` again, and a 502 as "Try again". `appConfig.test.ts`'s
   no-network scan exempts exactly `accountClient.web.ts` and pins the twin inert.
 - `tools/make-icons.mjs` — renders `assets/` from `headModel.ts`, which it
   imports by that name: Node strips the types itself from 22.18 on, which is

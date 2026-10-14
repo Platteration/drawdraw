@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -56,9 +56,11 @@ jobs:
 
   # Its own job, so that an advisory published against an unchanged tree turns audit red
   # on the next run (on the default branch, the weekly one at the latest) and leaves check
-  # meaning what it always meant. npm audit reads the lockfile: no install.
+  # meaning what it always meant. The gate runs npm audit, which reads the lockfile (no
+  # install), and fails on every high or critical advisory .github/audit/accepted.json does
+  # not accept (CONVENTIONS.md, "CI").
   audit:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -67,4 +69,4 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - run: npm audit --omit=dev --audit-level=high
+      - run: node .github/audit/npm-audit.mjs

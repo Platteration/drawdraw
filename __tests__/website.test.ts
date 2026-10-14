@@ -531,20 +531,28 @@ describe('what the docs say about Pro on the website', () => {
 });
 
 describe('/.well-known/security.txt', () => {
-  const fields = new Map(
-    read('public/.well-known/security.txt')
-      .split('\n')
-      .filter((l) => l && !l.startsWith('#'))
-      .map((l): [string, string] => {
-        const at = l.indexOf(': ');
-        return [l.slice(0, at), l.slice(at + 2)];
-      })
-  );
+  const lines = read('public/.well-known/security.txt')
+    .split('\n')
+    .filter((l) => l && !l.startsWith('#'))
+    .map((l): [string, string] => {
+      const at = l.indexOf(': ');
+      return [l.slice(0, at), l.slice(at + 2)];
+    });
+  const fields = new Map(lines);
 
-  it('names the private reporting route SECURITY.md asks for, and the policy', () => {
-    expect(fields.get('Contact')).toBe('https://github.com/Platteration/drawdraw/security/advisories/new');
-    expect(read('SECURITY.md')).toContain('Report a vulnerability');
-    expect(fields.get('Policy')).toBe('https://github.com/Platteration/drawdraw/blob/HEAD/SECURITY.md');
+  it('names the private reporting route SECURITY.md asks for, the issues page after it, and the policy', () => {
+    // The form reaches nothing while private reporting is switched off on the repository, so the
+    // issues page is the way in until it is on, and SECURITY.md says what such an issue says.
+    expect(lines.filter(([name]) => name === 'Contact').map(([, value]) => value)).toEqual([
+      'https://github.com/Platteration/drawdraw/security/advisories/new',
+      'https://github.com/Platteration/drawdraw/issues',
+    ]);
+    const policy = read('SECURITY.md').replace(/\s+/g, ' ');
+    expect(policy).toContain('Report a vulnerability');
+    expect(policy).toMatch(/open an issue that says only that you have a security report and how to reach you/);
+    // SECURITY.md on main, the branch the site is published from: blob/HEAD follows the default
+    // branch, which may not carry it.
+    expect(fields.get('Policy')).toBe('https://github.com/Platteration/drawdraw/blob/main/SECURITY.md');
     expect(fields.get('Preferred-Languages')).toBe('en');
   });
 

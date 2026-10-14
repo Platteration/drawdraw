@@ -1,5 +1,8 @@
-# DrawDraw. Report privately, as SECURITY.md asks: the link opens a private advisory.
+# DrawDraw. Report privately, as SECURITY.md asks: the first link opens a private advisory that
+# only the maintainers can read. While private reporting is switched off on the repository, open
+# an issue that says only that you have a report and how to reach you, with no details in it.
 Contact: https://github.com/Platteration/drawdraw/security/advisories/new
+Contact: https://github.com/Platteration/drawdraw/issues
 Expires: 2027-10-08T00:00:00.000Z
 Preferred-Languages: en
-Policy: https://github.com/Platteration/drawdraw/blob/HEAD/SECURITY.md
+Policy: https://github.com/Platteration/drawdraw/blob/main/SECURITY.md

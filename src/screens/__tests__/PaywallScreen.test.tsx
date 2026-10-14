@@ -127,6 +127,44 @@ describe('on a website whose api/ sells Pro', () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it('sends one Buy at a time: drawn disabled while a press is out, and a second press asks nothing', async () => {
+    // The kit's "For the page": a press that reaches Stripe while another's session is being
+    // made is answered 502, so the page keeps Buy disabled until the first press has its answer.
+    let answer: (note: string | null) => void = () => {};
+    const a = account({
+      user: { email: null },
+      buyPro: jest.fn(() => new Promise<string | null>((resolve) => (answer = resolve))),
+    });
+    await mount(a);
+    const buy = () => {
+      const node = root()
+        .findAll((n) => n.props && typeof n.props.onPress === 'function' && typeof n.type !== 'string')
+        .find((n) => n.findAllByType(Text).some((t) => [].concat(t.props.children).join('') === 'Buy'));
+      if (!node) throw new Error('no control says Buy');
+      return node;
+    };
+    expect([buy().props.disabled, buy().props.accessibilityState]).toEqual([false, { disabled: false }]);
+    // Not awaited: the press is out until `answer` is called.
+    await act(async () => {
+      void buy().props.onPress();
+    });
+    expect(a.buyPro).toHaveBeenCalledTimes(1);
+    expect([buy().props.disabled, buy().props.accessibilityState]).toEqual([true, { disabled: true }]);
+    // A press that gets through anyway (the handler called directly) is refused too.
+    await act(async () => {
+      void buy().props.onPress();
+    });
+    expect(a.buyPro).toHaveBeenCalledTimes(1);
+    await act(async () => answer('The shop could not be reached. Try again.'));
+    expect(notify).toHaveBeenCalledWith('Could not buy', 'The shop could not be reached. Try again.');
+    expect(buy().props.disabled).toBe(false);
+    await act(async () => {
+      void buy().props.onPress();
+    });
+    expect(a.buyPro).toHaveBeenCalledTimes(2);
+    await act(async () => answer(null));
+  });
+
   it('says why when Checkout could not be opened', async () => {
     const a = account({ user: { email: null }, buyPro: jest.fn(async () => 'DrawDraw Pro is not on sale right now.') });
     await mount(a);
