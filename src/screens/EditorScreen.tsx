@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,9 +11,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { captureRef, releaseCapture } from 'react-native-view-shot';
-import * as MediaLibrary from 'expo-media-library/legacy';
-import * as Sharing from 'expo-sharing';
+import { captureRef } from 'react-native-view-shot';
 import * as Haptics from 'expo-haptics';
 
 import GuideOverlay from '../components/GuideOverlay';
@@ -42,9 +40,8 @@ import {
   type Point2,
   type Proportions,
 } from '../lib/headModel';
-import { recoverProjects, saveSettings } from '../lib/storage';
-import { createAutosave } from '../lib/autosave';
-import { presentCapturedExport } from '../lib/exportLifecycle';
+import { saveSettings } from '../lib/storage';
+import { offerExport } from '../lib/exports';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 import { domElement, downloadFile, exportFileName, renderPng } from '../lib/webExport';
 
@@ -194,60 +191,47 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     ]
   );
 
-  const [autosave] = useState(() => createAutosave({
-    initialValue: settings,
-    save: (value) => saveSettings(project.id, value),
-    onError: (error) => {
-      if (mountedRef.current) setSaveError(error);
-    },
-  }));
-
-  // Record committed edits before another event can close or background the app.
-  useLayoutEffect(() => {
-    autosave.update(settings);
-  }, [autosave, settings]);
+  const saveTimer = useRef(null);
+  const latestSettings = useRef(settings);
+  latestSettings.current = settings;
+  const saveErrorShown = useRef(false);
+  const persist = useCallback(async (value) => {
+    try {
+      await saveSettings(project.id, value);
+      saveErrorShown.current = false;
+    } catch (error) {
+      if (!saveErrorShown.current) {
+        saveErrorShown.current = true;
+        Alert.alert('Drawing not saved', 'Your latest guide changes could not be saved. Keep this drawing open, free some storage, then try returning to Portraits again.');
+      }
+      throw error;
+    }
+  }, [project.id]);
 
   useEffect(() => {
-    mountedRef.current = true;
-    const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') autosave.flush().catch(() => {});
-    });
-    return () => {
-      mountedRef.current = false;
-      subscription.remove();
-      autosave.flush().catch(() => {});
-    };
-  }, [autosave]);
+    saveTimer.current = setTimeout(() => {
+      persist(settings).catch(() => {}); // persist reports failures visibly.
+    }, 600);
+    return () => clearTimeout(saveTimer.current);
+  }, [persist, settings]);
 
-  const closeEditor = async () => {
-    if (closingRef.current) return;
-    closingRef.current = true;
-    setClosing(true);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') {
+        clearTimeout(saveTimer.current);
+        persist(latestSettings.current).catch(() => {});
+      }
+    });
+    return () => subscription.remove();
+  }, [persist]);
+
+  const closeDrawing = async () => {
+    clearTimeout(saveTimer.current);
     try {
-      await autosave.flush();
+      await persist(latestSettings.current);
       onClose();
     } catch {
-      // Keep the current work and export controls available while storage recovers.
-    } finally {
-      closingRef.current = false;
-      if (mountedRef.current) setClosing(false);
-    }
-  };
-
-  const recoverDrawings = async () => {
-    if (recoveringRef.current) return;
-    recoveringRef.current = true;
-    setRecovering(true);
-    try {
-      await recoverProjects();
-      setRecoveryRequired(false);
-      await autosave.flush();
-      setSaveError(null);
-    } catch (error) {
-      setSaveError(error);
-    } finally {
-      recoveringRef.current = false;
-      if (mountedRef.current) setRecovering(false);
+      // Keep the unsaved drawing open so the user can retry or export it.
     }
   };
 
@@ -346,46 +330,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     }
     try {
       const uri = await captureRef(ref, { format: 'png', quality: 1, ...size });
-      await presentCapturedExport({
-        uri,
-        release: releaseCapture,
-        present: ({ onSave, onShare, onCancel, onDismiss }) => Alert.alert(name, 'Where do you want it?', [
-          { text: 'Save to Photos', onPress: onSave },
-          { text: 'Share…', onPress: onShare },
-          { text: 'Cancel', style: 'cancel', onPress: onCancel },
-        ], { cancelable: true, onDismiss }),
-        save: async () => {
-            try {
-              // Saving adds an image; it does not need granular read access.
-              // SDK57 Expo Go rejects photo/video granular requests even when
-              // writeOnly is true. Older Android still requests legacy writes.
-              const permission = await MediaLibrary.requestPermissionsAsync(true, []);
-              if (!permission.granted) {
-                Alert.alert('Permission needed', 'Allow photo library access to save exports.');
-                return;
-              }
-              await MediaLibrary.saveToLibraryAsync(uri);
-              Alert.alert('Saved', `${name} was saved to your photo library.`);
-            } catch (err) {
-              Alert.alert('Save failed', String(err?.message ?? err));
-            }
-        },
-        share: async () => {
-            try {
-              if (await Sharing.isAvailableAsync()) {
-                await Sharing.shareAsync(uri, { mimeType: 'image/png' });
-                // Android resolves when the chooser returns, without proving
-                // the receiving app has finished reading its content URI.
-                // Leave that capture to the native library/cache cleanup.
-                return { retainCapture: Platform.OS === 'android' };
-              } else {
-                Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
-              }
-            } catch (err) {
-              Alert.alert('Share failed', String(err?.message ?? err));
-            }
-        },
-      });
+      await offerExport(uri, name);
     } catch (err) {
       notify('Export failed', errorText(err));
     } finally {
@@ -436,8 +381,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={closeEditor} disabled={closing} hitSlop={12}>
-          <Text style={styles.headerAction}>{closing ? 'Saving…' : '‹ Portraits'}</Text>
+        <Pressable onPress={closeDrawing} hitSlop={12}>
+          <Text style={styles.headerAction}>‹ Portraits</Text>
         </Pressable>
         <Text style={type.title}>Three-segment head</Text>
         <Pressable

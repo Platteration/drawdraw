@@ -59,26 +59,9 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
   const [recoveryCopies, setRecoveryCopies] = useState(false);
 
   const refresh = useCallback(() => {
-    setRecoveryError(null);
-    hasRecoveryCopies().then(setRecoveryCopies).catch(() => {});
-    listProjects()
-      .then((projects) => {
-        setRecents(projects);
-        setStorageError(false);
-        setRecovery(null);
-      })
-      .catch(async () => {
-        setStorageError(true);
-        try {
-          const readable = await inspectRecoverableProjects();
-          setRecents(readable.projects);
-          const needsRecovery = readable.skippedCount > 0 || readable.resetSettingsCount > 0 || readable.renamedIdCount > 0;
-          setRecovery(needsRecovery && readable.projects.length > 0 ? readable : null);
-          if (!needsRecovery) setStorageError(false);
-        } catch {
-          setRecovery(null);
-        }
-      });
+    listProjects().then(setRecents).catch(() => {
+      Alert.alert('Could not load drawings', 'Saved storage could not be read. Your saved index has not been replaced. Try reopening the app.');
+    });
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -109,16 +92,19 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
       Alert.alert('Unsupported image', 'Could not read the dimensions of that image.');
       return;
     }
-    onOpenProject(await createProject(asset));
+    const project = await createProject(asset);
+    if (project.persistenceWarning) Alert.alert('Portrait is temporary', project.persistenceWarning);
+    onOpenProject(project);
   };
 
   const pickFromLibrary = async () => {
     if (busy) return;
     setBusy(true);
     try {
+      // The system picker grants access to the selected image, not the whole library.
       await openAsset(await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 1 }));
-    } catch (err) {
-      Alert.alert('Could not import portrait', String(err?.message ?? err));
+    } catch (error) {
+      Alert.alert('Could not open portrait', String(error?.message ?? error));
     } finally {
       setBusy(false);
     }
@@ -133,9 +119,9 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
         Alert.alert('Permission needed', 'Allow camera access to take a portrait.');
         return;
       }
-      await openAsset(await ImagePicker.launchCameraAsync({ quality: 1 }));
-    } catch (err) {
-      Alert.alert('Could not take photo', String(err?.message ?? err));
+      await openAsset(await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 }));
+    } catch (error) {
+      Alert.alert('Could not take photo', String(error?.message ?? error));
     } finally {
       setBusy(false);
     }
@@ -151,26 +137,9 @@ export default function HomeScreen({ onOpenProject, pro = false, onRequestPro = 
         onPress: async () => {
           try {
             await deleteProject(project.id);
-          } catch (err) {
-            Alert.alert('Could not remove drawing', String(err?.message ?? err));
-          } finally {
             refresh();
-          }
-        },
-      },
-    ]);
-  };
-
-  const confirmClearRecovery = () => {
-    Alert.alert('Remove recovery copies?', 'This permanently removes the original data kept during recovery. Your current drawings remain saved.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove copies', style: 'destructive', onPress: async () => {
-          try {
-            await clearRecoveryCopies();
-            setRecoveryCopies(false);
           } catch (error) {
-            Alert.alert('Could not remove recovery copies', String(error?.message ?? error));
+            Alert.alert('Could not remove drawing', String(error?.message ?? error));
           }
         },
       },

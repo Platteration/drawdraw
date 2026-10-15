@@ -42,7 +42,7 @@
         {
           "savePhotosPermission": "DrawDraw saves your exported guide overlays and tracing layers to your photo library.",
           "isAccessMediaLocationEnabled": false,
-          "granularPermissions": []
+          "granularPermissions": ["photo"]
         }
       ],
       "./plugins/withDebugInternet",
