@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   AppState,
-  BackHandler,
   Image,
-  PixelRatio,
   Platform,
   Pressable,
   ScrollView,
@@ -12,7 +11,10 @@ import {
   Text,
   View,
 } from 'react-native';
-import { captureRef } from 'react-native-view-shot';
+import { captureRef, releaseCapture } from 'react-native-view-shot';
+import * as MediaLibrary from 'expo-media-library/legacy';
+import * as Sharing from 'expo-sharing';
+import * as Haptics from 'expo-haptics';
 
 import GuideOverlay from '../components/GuideOverlay';
 import DraggableGuide from '../components/DraggableGuide';
@@ -40,13 +42,9 @@ import {
   type Point2,
   type Proportions,
 } from '../lib/headModel';
-import { confirmAction, notify } from '../lib/confirm';
-import { errorText } from '../lib/errors';
-import { offerExport } from '../lib/exports';
-import { captureSize } from '../lib/exportSize';
-import { haptics } from '../lib/feedback';
-import type { ProjectSettings } from '../lib/projectShape';
-import { saveSettings, type CreatedProject } from '../lib/storage';
+import { recoverProjects, saveSettings } from '../lib/storage';
+import { createAutosave } from '../lib/autosave';
+import { presentCapturedExport } from '../lib/exportLifecycle';
 import { FIT_STEPS, solveHeadFromTaps } from '../lib/fitSolver';
 import { domElement, downloadFile, exportFileName, renderPng } from '../lib/webExport';
 
@@ -119,8 +117,17 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const [step, setStep] = useState<number | null>(null);
   const [playing, setPlaying] = useState(false);
 
-  const [viewport, setViewport] = useState<Size | null>(null); // area available for the image
+  const [viewport, setViewport] = useState(null); // area available for the image
+  const [photoLayers, setPhotoLayers] = useState({ combined: 'loading', tracing: 'loading' });
   const [busy, setBusy] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+  const [closing, setClosing] = useState(false);
+  const [recoveryRequired, setRecoveryRequired] = useState(project.recoveryRequired === true);
+  const [recovering, setRecovering] = useState(false);
+  const closingRef = useRef(false);
+  const exportingRef = useRef(false);
+  const recoveringRef = useRef(false);
+  const mountedRef = useRef(true);
 
   const combinedRef = useRef<View>(null); // photo + guides
   const guidesOnlyRef = useRef<View>(null); // guides on transparency
@@ -187,113 +194,62 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     ]
   );
 
-  // Debounced autosave. `unsaved` holds the setup no write has confirmed
-  // yet: it is set on every change and cleared only once a write of that very
-  // value has succeeded, so a write that fails leaves it for the next flush
-  // rather than letting the editor believe it was kept.
-  const pendingSave = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const unsaved = useRef<ProjectSettings | null>(null);
-  const saveErrorShown = useRef(false);
-  const { id: projectId, ephemeral } = project;
-
-  const persist = useCallback(
-    async (value: ProjectSettings) => {
-      // A portrait that could not be kept has no record to save into, and the
-      // user has been told so (on the web, by the home screen).
-      if (!ephemeral) await saveSettings(projectId, value);
-      if (unsaved.current === value) unsaved.current = null;
-      saveErrorShown.current = false;
+  const [autosave] = useState(() => createAutosave({
+    initialValue: settings,
+    save: (value) => saveSettings(project.id, value),
+    onError: (error) => {
+      if (mountedRef.current) setSaveError(error);
     },
-    [projectId, ephemeral]
-  );
+  }));
 
-  // A save in the background fails where nobody is looking: say so, once per
-  // run of failures, rather than on every slider step.
-  const reportUnsaved = useCallback(() => {
-    if (saveErrorShown.current) return;
-    saveErrorShown.current = true;
-    notify(
-      'Drawing not saved',
-      'Your latest guide changes could not be saved. Keep this drawing open, free some storage, then try returning to Portraits again.'
-    );
-  }, []);
-
-  /** Write whatever no save has confirmed yet, now. */
-  const flush = useCallback(() => {
-    clearTimeout(pendingSave.current ?? undefined);
-    pendingSave.current = null;
-    const value = unsaved.current;
-    return value ? persist(value) : Promise.resolve();
-  }, [persist]);
+  // Record committed edits before another event can close or background the app.
+  useLayoutEffect(() => {
+    autosave.update(settings);
+  }, [autosave, settings]);
 
   useEffect(() => {
-    unsaved.current = settings;
-    pendingSave.current = setTimeout(() => {
-      pendingSave.current = null;
-      persist(settings).catch(reportUnsaved);
-    }, 600);
-    return () => clearTimeout(pendingSave.current ?? undefined);
-  }, [persist, reportUnsaved, settings]);
-
-  // Leaving the editor unmounts it, which used to cancel the pending write and
-  // silently discard anything changed in the last 600 ms — moving a slider and
-  // immediately tapping '‹ Portraits' is an ordinary thing to do. Leaving
-  // through the editor's own ways out flushes before it goes (closeDrawing);
-  // this catches every other unmount, once, on the way out.
-  useEffect(
-    () => () => {
-      flush().catch(() => {});
-    },
-    [flush]
-  );
-
-  // An app sent to the background can be killed there without another word,
-  // so whatever is unsaved is written as it goes.
-  useEffect(() => {
+    mountedRef.current = true;
     const subscription = AppState.addEventListener('change', (state) => {
-      if (state !== 'active') flush().catch(reportUnsaved);
+      if (state !== 'active') autosave.flush().catch(() => {});
     });
-    return () => subscription.remove();
-  }, [flush, reportUnsaved]);
+    return () => {
+      mountedRef.current = false;
+      subscription.remove();
+      autosave.flush().catch(() => {});
+    };
+  }, [autosave]);
 
-  // '‹ Portraits' and Android's Back: the latest setup is written before the
-  // editor goes. When it cannot be, leaving is the user's call, made knowing
-  // it: staying keeps the drawing on screen to export or to try again.
-  const closeDrawing = useCallback(async () => {
+  const closeEditor = async () => {
+    if (closingRef.current) return;
+    closingRef.current = true;
+    setClosing(true);
     try {
-      await flush();
+      await autosave.flush();
+      onClose();
     } catch {
-      confirmAction({
-        title: 'Drawing not saved',
-        message:
-          'Your latest guide changes could not be saved. Stay to export the drawing, or to try again once there is more storage free.',
-        cancelLabel: 'Stay',
-        confirmLabel: 'Leave without saving',
-        onConfirm: onClose,
-      });
-      return;
+      // Keep the current work and export controls available while storage recovers.
+    } finally {
+      closingRef.current = false;
+      if (mountedRef.current) setClosing(false);
     }
-    onClose();
-  }, [flush, onClose]);
+  };
 
-  // Android's hardware/gesture Back. Without a subscriber it falls through to
-  // the default handler and closes the app instead of leaving the editor. The
-  // editor has its own shallow stack: a fit in progress is backed out of first,
-  // so three-tap fits are not silently discarded. Android only: the handler is
-  // a no-op stub on iOS and logs an error on react-native-web.
-  useEffect(() => {
-    if (Platform.OS !== 'android') return undefined;
-    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (mode === 'fit') {
-        setFitTaps([]);
-        setMode('rotate');
-        return true;
-      }
-      closeDrawing();
-      return true;
-    });
-    return () => sub.remove();
-  }, [mode, closeDrawing]);
+  const recoverDrawings = async () => {
+    if (recoveringRef.current) return;
+    recoveringRef.current = true;
+    setRecovering(true);
+    try {
+      await recoverProjects();
+      setRecoveryRequired(false);
+      await autosave.flush();
+      setSaveError(null);
+    } catch (error) {
+      setSaveError(error);
+    } finally {
+      recoveringRef.current = false;
+      if (mountedRef.current) setRecovering(false);
+    }
+  };
 
   const guides = {
     horizontal: showHorizontal ? hGuides : [],
@@ -360,10 +316,18 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
     }
   };
 
-  // `size` is the wanted output in PIXELS; captureSize turns it into whatever
-  // unit this platform's view-shot expects (see src/lib/exportSize.ts).
-  const exportView = async (ref: React.RefObject<View | null>, name: string, size: Size) => {
-    if (busy || !ref.current) return;
+  // Each off-screen Image decodes independently. view-shot does not wait for
+  // those loads, and the visible photo loading does not make a capture ready.
+  const photoLoadEvents = (layer) => ({
+    onLoadStart: () => setPhotoLayers((current) => ({ ...current, [layer]: 'loading' })),
+    onLoad: () => setPhotoLayers((current) => ({ ...current, [layer]: 'loaded' })),
+    onError: () => setPhotoLayers((current) => ({ ...current, [layer]: 'error' })),
+  });
+
+  const exportView = async (ref, name, size, photoLayer) => {
+    if (photoLayer && photoLayers[photoLayer] !== 'loaded') return;
+    if (exportingRef.current || !ref.current) return;
+    exportingRef.current = true;
     setBusy(true);
     // A browser has no photo library and no share sheet to offer, and
     // react-native-view-shot's web capture cannot run under the site's policy
@@ -381,20 +345,52 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
       return;
     }
     try {
-      const uri = await captureRef(ref, {
-        format: 'png',
-        quality: 1,
-        ...captureSize(size, { platform: Platform.OS, pixelRatio: PixelRatio.get() }),
+      const uri = await captureRef(ref, { format: 'png', quality: 1, ...size });
+      await presentCapturedExport({
+        uri,
+        release: releaseCapture,
+        present: ({ onSave, onShare, onCancel, onDismiss }) => Alert.alert(name, 'Where do you want it?', [
+          { text: 'Save to Photos', onPress: onSave },
+          { text: 'Share…', onPress: onShare },
+          { text: 'Cancel', style: 'cancel', onPress: onCancel },
+        ], { cancelable: true, onDismiss }),
+        save: async () => {
+            try {
+              // Saving adds an image; it does not need granular read access.
+              // SDK57 Expo Go rejects photo/video granular requests even when
+              // writeOnly is true. Older Android still requests legacy writes.
+              const permission = await MediaLibrary.requestPermissionsAsync(true, []);
+              if (!permission.granted) {
+                Alert.alert('Permission needed', 'Allow photo library access to save exports.');
+                return;
+              }
+              await MediaLibrary.saveToLibraryAsync(uri);
+              Alert.alert('Saved', `${name} was saved to your photo library.`);
+            } catch (err) {
+              Alert.alert('Save failed', String(err?.message ?? err));
+            }
+        },
+        share: async () => {
+            try {
+              if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(uri, { mimeType: 'image/png' });
+                // Android resolves when the chooser returns, without proving
+                // the receiving app has finished reading its content URI.
+                // Leave that capture to the native library/cache cleanup.
+                return { retainCapture: Platform.OS === 'android' };
+              } else {
+                Alert.alert('Sharing unavailable', 'Sharing is not available on this device.');
+              }
+            } catch (err) {
+              Alert.alert('Share failed', String(err?.message ?? err));
+            }
+        },
       });
-
-      // Not awaited: the editor is usable again once the capture is made.
-      // offerExport keeps the temporary file until the choice made in its
-      // dialog has finished with it, and then releases it.
-      offerExport(uri, name).catch((err) => notify('Export failed', errorText(err)));
     } catch (err) {
       notify('Export failed', errorText(err));
     } finally {
-      setBusy(false);
+      exportingRef.current = false;
+      if (mountedRef.current) setBusy(false);
     }
   };
 
@@ -406,6 +402,9 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   const headInteractive = showHead && mode !== 'lines' && mode !== 'fit';
   const linesEditable = mode === 'lines';
   const photoVisible = !practice || peeking;
+  const practiceBackground = practice && guideColor === GUIDE_COLORS.find((color) => color.name === 'Chalk').value
+    ? colors.canvasMat
+    : colors.paper;
 
   // Everything that goes on top of the photo, mirrored 1:1 in the exports.
   const renderGuides = ({ draft = false }: { draft?: boolean } = {}) => (
@@ -437,13 +436,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable
-          onPress={closeDrawing}
-          hitSlop={12}
-          accessibilityRole="button"
-          accessibilityLabel="Back to portraits"
-        >
-          <Text style={styles.headerAction}>‹ Portraits</Text>
+        <Pressable onPress={closeEditor} disabled={closing} hitSlop={12}>
+          <Text style={styles.headerAction}>{closing ? 'Saving…' : '‹ Portraits'}</Text>
         </Pressable>
         <Text style={type.title}>Three-segment head</Text>
         <Pressable
@@ -456,6 +450,19 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         </Pressable>
       </View>
 
+      {(saveError || recoveryRequired) && (
+        <View style={styles.saveWarning} accessibilityLiveRegion="polite">
+          <Text style={styles.saveWarningText}>
+            {recoveryRequired
+              ? 'Some saved drawings or guide settings need recovery. Damaged guide settings use defaults. The original data will be kept in a recovery copy. You can export this drawing below.'
+              : 'Changes are not saved. Keep this portrait open and retry, or export your work below.'}
+          </Text>
+          <Pressable onPress={recoveryRequired ? recoverDrawings : () => autosave.flush().catch(() => {})} disabled={recovering} hitSlop={8}>
+            <Text style={styles.headerAction}>{recovering ? 'Recovering…' : recoveryRequired ? 'Recover saved drawings' : 'Retry save'}</Text>
+          </Pressable>
+        </View>
+      )}
+
       <View
         style={styles.canvasArea}
         onLayout={(e) => {
@@ -464,7 +471,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         }}
       >
         {ready && (
-          <View style={[styles.canvas, { width: displayW, height: displayH }]}>
+          <View style={[styles.canvas, { width: displayW, height: displayH, backgroundColor: practiceBackground }]}>
             <Image
               source={{ uri: image.uri }}
               style={{ width: displayW, height: displayH, opacity: photoVisible ? 1 : 0 }}
@@ -688,7 +695,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
                   key={c.value}
                   onPress={() => setGuideColor(c.value)}
                   accessibilityRole="button"
-                  accessibilityLabel={c.name}
+                  accessibilityLabel={`${c.name} guide color`}
                   accessibilityState={{ selected: c.value === guideColor }}
                   style={[
                     styles.swatch,
@@ -722,12 +729,19 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         </ScrollView>
 
         <SectionLabel>Export · PNG at full resolution</SectionLabel>
+        {ready && Object.values(photoLayers).some((status) => status !== 'loaded') && (
+          <Text style={styles.saveWarningText} accessibilityLiveRegion="polite">
+            {Object.values(photoLayers).includes('error')
+              ? 'A photo layer could not load. Reopen the portrait to retry; guide-only exports still work.'
+              : 'Loading photo layers… You can export the guide now.'}
+          </Text>
+        )}
         <View style={styles.exportRow}>
           <PrimaryButton
             label={'Photo\n+ guide'}
             tone="quiet"
-            disabled={exportsBusy}
-            onPress={() => exportView(combinedRef, 'Photo with guide', photoSize)}
+            disabled={busy || !ready || photoLayers.combined !== 'loaded'}
+            onPress={() => exportView(combinedRef, 'Photo with guide', photoSize, 'combined')}
           />
           <PrimaryButton
             label={'Guide only\ntransparent'}
@@ -739,8 +753,8 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
           <PrimaryButton
             label={'Tracing\nlayer'}
             tone="quiet"
-            disabled={exportsBusy}
-            onPress={() => exportView(tracingRef, 'Tracing layer', photoSize)}
+            disabled={busy || !ready || photoLayers.tracing !== 'loaded'}
+            onPress={() => exportView(tracingRef, 'Tracing layer', photoSize, 'tracing')}
           />
           <PrimaryButton
             label={pro ? 'Turnaround\nsix views' : 'Turnaround\nsix views ✦'}
@@ -777,8 +791,12 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
         {ready && (
           <>
             <View ref={combinedRef} collapsable={false} style={{ width: displayW, height: displayH }}>
-              <Image source={{ uri: image.uri }} style={{ width: displayW, height: displayH }} />
-              {!interacting && renderGuides()}
+              <Image
+                source={{ uri: image.uri }}
+                style={{ width: displayW, height: displayH }}
+                {...photoLoadEvents('combined')}
+              />
+              {renderGuides()}
             </View>
             <View
               ref={guidesOnlyRef}
@@ -795,6 +813,7 @@ export default function EditorScreen({ project, onClose, pro = false, onRequestP
               <Image
                 source={{ uri: image.uri }}
                 style={{ width: displayW, height: displayH, opacity: tracingOpacity }}
+                {...photoLoadEvents('tracing')}
               />
             </View>
           </>
@@ -830,6 +849,16 @@ const styles = StyleSheet.create({
     color: colors.accent,
     fontSize: 14,
     fontWeight: '700',
+  },
+  saveWarning: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 6,
+  },
+  saveWarningText: {
+    color: colors.graphite,
+    fontSize: 13,
+    lineHeight: 18,
   },
   canvasArea: {
     flex: 1,

@@ -30,8 +30,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const { buildHeadWireframe, HEAD_HEIGHT_UNITS } = await import('../src/lib/headModel.ts');
 
 const PAPER = [0xf4, 0xef, 0xe6];
-const SANGUINE = [0xb4, 0x54, 0x3a];
-const WHITE = [0xff, 0xff, 0xff];
+const SANGUINE = [0xa2, 0x48, 0x30];
 
 // --- raster ---------------------------------------------------------------
 

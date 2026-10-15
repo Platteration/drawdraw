@@ -218,7 +218,9 @@ export const ELEMENTS: readonly ElementSpec[] = [
 
 export const DEFAULT_ELEMENTS: ElementSet = { segments: true, center: true, eyeLine: true };
 
-const rad = (deg: number) => (deg * Math.PI) / 180;
+// Reduce degrees before multiplication: finite saved angles can otherwise
+// overflow radians, even though their equivalent rotation is well defined.
+const rad = (deg) => ((deg % 360) * Math.PI) / 180;
 
 /**
  * out[i][j] = a[i][0]·b[0][j] + a[i][1]·b[1][j] + a[i][2]·b[2][j], term for

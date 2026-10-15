@@ -23,13 +23,12 @@
   "dependencies": {
     "@expo/metro-runtime": "~57.0.16",
     "@react-native-async-storage/async-storage": "2.2.0",
-    "expo": "~57.0.20",
-    "expo-constants": "~57.0.19",
+    "expo": "~57.0.27",
     "expo-file-system": "~57.0.7",
     "expo-haptics": "~57.0.3",
-    "expo-image-picker": "~57.0.19",
+    "expo-image-picker": "~57.0.20",
     "expo-media-library": "~57.0.5",
-    "expo-sharing": "~57.0.21",
+    "expo-sharing": "~57.0.22",
     "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
@@ -39,7 +38,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-svg": "15.15.4",
     "react-native-view-shot": "5.1.0",
-    "react-native-web": "~0.21.0"
+    "react-native-web": "^0.21.4"
   },
   "devDependencies": {
     "@babel/core": "^7.25.0",
@@ -51,14 +50,7 @@
     "eslint-config-expo": "~57.0.2",
     "globals": "^16.5.0",
     "jest": "^29.7.0",
-    "jest-expo": "~57.0.5",
-    "playwright": "1.64.0",
-    "typescript": "~6.0.3"
-  },
-  "overrides": {
-    "xcode": {
-      "uuid": "11.1.1"
-    }
+    "playwright": "^1.64.0"
   },
   "private": true,
   "engines": {
@@ -71,5 +63,10 @@
       "**/__tests__/**/*.test.ts",
       "**/__tests__/**/*.test.tsx"
     ]
+  },
+  "overrides": {
+    "xcode@3.0.1": {
+      "uuid": "11.1.1"
+    }
   }
 }
